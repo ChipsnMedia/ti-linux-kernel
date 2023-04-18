@@ -1062,8 +1062,8 @@ struct vpu_instance {
 	enum vpu_instance_type type;
 	const struct vpu_instance_ops *ops;
 
-	enum wave_std		 std;
-	s32			 id;
+	enum wave_std std;
+	s32 id;
 	union {
 		struct enc_info enc_info;
 		struct dec_info dec_info;
@@ -1077,6 +1077,7 @@ struct vpu_instance {
 	u32 conf_win_width;
 	u32 conf_win_height;
 	u64 timestamp;
+	enum frame_buffer_format output_format;
 	bool cbcr_interleave;
 	bool nv21;
 	bool eos;
