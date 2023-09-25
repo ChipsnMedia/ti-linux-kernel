@@ -373,7 +373,7 @@ static int wave5_vpu_remove(struct platform_device *pdev)
 
 static const struct wave5_match_data wave521c_data = {
 	.flags = WAVE5_IS_ENC | WAVE5_IS_DEC,
-	.fw_name = "wave521c_codec_fw.bin",
+	.fw_name = "cnm/wave521c_k3_codec_fw.bin",
 };
 
 static const struct of_device_id wave5_dt_ids[] = {
