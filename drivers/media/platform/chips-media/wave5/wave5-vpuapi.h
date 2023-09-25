@@ -361,6 +361,9 @@ struct vpu_rect {
 struct dec_open_param {
 	dma_addr_t bitstream_buffer;
 	size_t bitstream_buffer_size;
+	u32 pri_ext_addr;
+	u32 pri_axprot;
+	u32 pri_axcache;
 };
 
 struct dec_initial_info {
@@ -580,6 +583,9 @@ struct enc_open_param {
 	enum packed_format_num packed_format; /* <<vpuapi_h_packed_format_num>> */
 	enum frame_buffer_format src_format;
 	bool line_buf_int_en;
+	u32 pri_ext_addr;
+	u32 pri_axprot;
+	u32 pri_axcache;
 	u32 rc_enable : 1; /* rate control */
 };
 
@@ -665,8 +671,8 @@ struct dec_info {
 	struct dec_open_param open_param;
 	struct dec_initial_info initial_info;
 	struct dec_initial_info new_seq_info; /* temporal new sequence information */
-	u32 stream_wr_ptr;
-	u32 stream_rd_ptr;
+	dma_addr_t stream_wr_ptr;
+	dma_addr_t stream_rd_ptr;
 	u32 frame_display_flag;
 	dma_addr_t stream_buf_start_addr;
 	dma_addr_t stream_buf_end_addr;
@@ -703,8 +709,8 @@ struct dec_info {
 struct enc_info {
 	struct enc_open_param open_param;
 	struct enc_initial_info initial_info;
-	u32 stream_rd_ptr;
-	u32 stream_wr_ptr;
+	dma_addr_t stream_rd_ptr;
+	dma_addr_t stream_wr_ptr;
 	dma_addr_t stream_buf_start_addr;
 	dma_addr_t stream_buf_end_addr;
 	u32 stream_buf_size;
@@ -754,6 +760,7 @@ struct vpu_device {
 	struct vpu_buf sram_buf;
 	void __iomem *vdb_register;
 	u32 product_code;
+	u32 ext_addr;
 	struct ida inst_ida;
 	struct clk_bulk_data *clks;
 	int num_clks;
