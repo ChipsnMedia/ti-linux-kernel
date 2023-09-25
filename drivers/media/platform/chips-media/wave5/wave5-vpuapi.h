@@ -489,6 +489,7 @@ struct enc_wave_param {
 	u32 decoding_refresh_type: 2; /* 0=non-IRAP, 1=CRA, 2=IDR */
 	u32 intra_qp; /* quantization parameter of intra picture */
 	u32 intra_period; /* period of intra picture in GOP size */
+	u32 forced_idr_header_enable: 2;
 	u32 conf_win_top; /* top offset of conformance window */
 	u32 conf_win_bot; /* bottom offset of conformance window */
 	u32 conf_win_left; /* left offset of conformance window */
