@@ -160,6 +160,16 @@ enum set_param_option {
 #define MIN_VBV_BUFFER_SIZE			10
 #define MAX_VBV_BUFFER_SIZE			3000
 
+/* Bitstream buffer option: Explicit End
+ * When set to 1 the VPU assumes that the bitstream has at least one frame and
+ * will read until the end of the bitstream buffer.
+ * When set to 0 the VPU will not read the last few bytes.
+ * This option can be set anytime but cannot be cleared during processing.
+ * It can be set to force finish decoding even though there is not enough
+ * bitstream data for a full frame.
+ */
+#define BS_EXPLICIT_END_MODE_ON			1
+
 #define BUFFER_MARGIN				4096
 
 #define MAX_FIRMWARE_CALL_RETRY			10
@@ -208,6 +218,24 @@ enum codec_command {
 	ENC_GET_QUEUE_STATUS,
 	DEC_RESET_FRAMEBUF_INFO,
 	DEC_GET_SEQ_INFO,
+};
+
+enum error_conceal_mode {
+	ERROR_CONCEAL_MODE_OFF = 0, /* conceal off */
+	ERROR_CONCEAL_MODE_INTRA_ONLY = 1, /* intra conceal in intra-picture, inter-picture */
+	ERROR_CONCEAL_MODE_INTRA_INTER = 2
+};
+
+enum error_conceal_unit {
+	ERROR_CONCEAL_UNIT_PICTURE = 0, /* picture-level error conceal */
+	ERROR_CONCEAL_UNIT_SLICE_TILE = 1, /* slice/tile-level error conceal */
+	ERROR_CONCEAL_UNIT_BLOCK_ROW = 2, /* block-row-level error conceal */
+	ERROR_CONCEAL_UNIT_BLOCK = 3 /* block-level conceal */
+};
+
+enum cb_cr_order {
+	CBCR_ORDER_NORMAL,
+	CBCR_ORDER_REVERSED
 };
 
 enum mirror_direction {
@@ -470,39 +498,48 @@ struct custom_gop_pic_param {
 	s32 temporal_id; /* temporal ID of nth picture in the custom GOP */
 };
 
+
+struct custom_gop_param {
+	u32 custom_gop_size; /* the size of custom GOP (0~8) */
+	struct custom_gop_pic_param pic_param[MAX_GOP_NUM];
+};
+
+
 struct enc_wave_param {
 	/*
-	 * profile indicator (HEVC only)
+	 * A profile indicator (HEVC only)
 	 *
-	 * 0 : the firmware determines a profile according to the internal_bit_depth
+	 * 0 : the firmware determines a profile according to internalbitdepth
 	 * 1 : main profile
 	 * 2 : main10 profile
 	 * 3 : main still picture profile
-	 * In the AVC encoder, a profile cannot be set by the host application.
-	 * The firmware decides it based on internal_bit_depth.
-	 * profile = HIGH (bitdepth 8) profile = HIGH10 (bitdepth 10)
+	 * in AVC encoder, a profile cannot be set by host application. the firmware decides it
+	 * based on internalbitdepth. it is HIGH profile for bitdepth of 8 and HIGH10 profile for
+	 * bitdepth of 10.
 	 */
 	u32 profile;
-	u32 level; /* level indicator (level * 10) */
+	u32 level; /* A level indicator (level * 10) */
 	u32 internal_bit_depth: 4; /* 8/10 */
 	u32 gop_preset_idx: 4; /* 0 - 9 */
 	u32 decoding_refresh_type: 2; /* 0=non-IRAP, 1=CRA, 2=IDR */
-	u32 intra_qp; /* quantization parameter of intra picture */
-	u32 intra_period; /* period of intra picture in GOP size */
+	u32 intra_qp; /* A quantization parameter of intra picture */
+	u32 intra_period; /* A period of intra picture in GOP size */
 	u32 forced_idr_header_enable: 2;
-	u32 conf_win_top; /* top offset of conformance window */
-	u32 conf_win_bot; /* bottom offset of conformance window */
-	u32 conf_win_left; /* left offset of conformance window */
-	u32 conf_win_right; /* right offset of conformance window */
+	u32 conf_win_top; /* A top offset of conformance window */
+	u32 conf_win_bot; /* A bottom offset of conformance window */
+	u32 conf_win_left; /* A left offset of conformance window */
+	u32 conf_win_right; /* A right offset of conformance window */
+	u32 independ_slice_mode_arg;
+	u32 depend_slice_mode_arg;
 	u32 intra_refresh_mode: 3;
 	/*
-	 * Argument for intra_ctu_refresh_mode.
+	 * it specifies an intra CTU refresh interval. depending on intra_refresh_mode,
+	 * it can mean one of the following.
 	 *
-	 * Depending on intra_refresh_mode, it can mean one of the following:
-	 * - intra_ctu_refresh_mode (1) -> number of consecutive CTU rows
-	 * - intra_ctu_refresh_mode (2) -> the number of consecutive CTU columns
-	 * - intra_ctu_refresh_mode (3) -> step size in CTU
-	 * - intra_ctu_refresh_mode (4) -> number of intra ct_us to be encoded in a picture
+	 * the number of consecutive CTU rows for intra_ctu_refresh_mode of 1
+	 * the number of consecutive CTU columns for intra_ctu_refresh_mode of 2
+	 * A step size in CTU for intra_ctu_refresh_mode of 3
+	 * the number of intra ct_us to be encoded in a picture for intra_ctu_refresh_mode of 4
 	 */
 	u32 intra_refresh_arg;
 	/*
@@ -512,38 +549,90 @@ struct enc_wave_param {
 	 * 3 : fast mode (fast encoding speed, low picture quality)
 	 */
 	u32 depend_slice_mode : 2;
-	u32 depend_slice_mode_arg;
-	u32 independ_slice_mode : 1; /* 0=no-multi-slice, 1=slice-in-ctu-number*/
-	u32 independ_slice_mode_arg;
+	u32 use_recommend_enc_param: 2;
 	u32 max_num_merge: 2;
-	s32 beta_offset_div2: 4; /* sets beta_offset_div2 for deblocking filter */
-	s32 tc_offset_div2: 4; /* sets tc_offset_div3 for deblocking filter */
+	u32 scaling_list_enable: 2;
+	u32 bit_alloc_mode: 2; /* 0=ref-pic-priority, 1=uniform, 2=fixed_bit_ratio */
+	s32 beta_offset_div2: 4; /* it sets beta_offset_div2 for deblocking filter */
+	s32 tc_offset_div2: 4; /* it sets tc_offset_div3 for deblocking filter */
 	u32 hvs_qp_scale: 4; /* QP scaling factor for CU QP adjust if hvs_qp_scale_enable is 1 */
-	u32 hvs_max_delta_qp; /* maximum delta QP for HVS */
+	u32 hvs_max_delta_qp; /* A maximum delta QP for HVS */
+	/*
+	 * A fixed bit ratio (1 ~ 255) for each picture of GOP's bit
+	 * allocation
+	 *
+	 * N = 0 ~ (MAX_GOP_SIZE - 1)
+	 * MAX_GOP_SIZE = 8
+	 *
+	 * for instance when MAX_GOP_SIZE is 3, fixed_bit_ratio0, fixed_bit_ratio1, and
+	 * fixed_bit_ratio2 can be set as 2, 1, and 1 respectively for
+	 * the fixed bit ratio 2:1:1. this is only valid when bit_alloc_mode is 2.
+	 */
+	u8 fixed_bit_ratio[MAX_GOP_NUM];
+	struct custom_gop_param gop_param; /* <<vpuapi_h_custom_gop_param>> */
+	u32 num_units_in_tick;
+	u32 time_scale;
+	u32 num_ticks_poc_diff_one;
 	s32 chroma_cb_qp_offset; /* the value of chroma(cb) QP offset */
 	s32 chroma_cr_qp_offset; /* the value of chroma(cr) QP offset */
 	s32 initial_rc_qp;
 	u32 nr_intra_weight_y;
-	u32 nr_intra_weight_cb; /* weight to cb noise level for intra picture (0 ~ 31) */
-	u32 nr_intra_weight_cr; /* weight to cr noise level for intra picture (0 ~ 31) */
+	u32 nr_intra_weight_cb; /* A weight to cb noise level for intra picture (0 ~ 31) */
+	u32 nr_intra_weight_cr; /* A weight to cr noise level for intra picture (0 ~ 31) */
 	u32 nr_inter_weight_y;
-	u32 nr_inter_weight_cb; /* weight to cb noise level for inter picture (0 ~ 31) */
-	u32 nr_inter_weight_cr; /* weight to cr noise level for inter picture (0 ~ 31) */
-	u32 min_qp_i; /* minimum QP of I picture for rate control */
-	u32 max_qp_i; /* maximum QP of I picture for rate control */
-	u32 min_qp_p; /* minimum QP of P picture for rate control */
-	u32 max_qp_p; /* maximum QP of P picture for rate control */
-	u32 min_qp_b; /* minimum QP of B picture for rate control */
-	u32 max_qp_b; /* maximum QP of B picture for rate control */
-	u32 avc_idr_period; /* period of IDR picture (0 ~ 1024). 0 - implies an infinite period */
-	u32 avc_slice_arg; /* the number of MB for a slice when avc_slice_mode is set with 1 */
+	u32 nr_inter_weight_cb; /* A weight to cb noise level for inter picture (0 ~ 31) */
+	u32 nr_inter_weight_cr; /* A weight to cr noise level for inter picture (0 ~ 31) */
+	u32 nr_noise_sigma_y; /* Y noise standard deviation if nr_noise_est_enable is 0 */
+	u32 nr_noise_sigma_cb;/* cb noise standard deviation if nr_noise_est_enable is 0 */
+	u32 nr_noise_sigma_cr;/* cr noise standard deviation if nr_noise_est_enable is 0 */
+	u32 bg_thr_diff;
+	u32 bg_thr_mean_diff;
+	u32 bg_lambda_qp;
+	u32 bg_delta_qp;
+	u32 pu04_delta_rate: 8; /* added to the total cost of 4x4 blocks */
+	u32 pu08_delta_rate: 8; /* added to the total cost of 8x8 blocks */
+	u32 pu16_delta_rate: 8; /* added to the total cost of 16x16 blocks */
+	u32 pu32_delta_rate: 8; /* added to the total cost of 32x32 blocks */
+	u32 pu04_intra_planar_delta_rate: 8;
+	u32 pu04_intra_dc_delta_rate: 8;
+	u32 pu04_intra_angle_delta_rate: 8;
+	u32 pu08_intra_planar_delta_rate: 8;
+	u32 pu08_intra_dc_delta_rate: 8;
+	u32 pu08_intra_angle_delta_rate: 8;
+	u32 pu16_intra_planar_delta_rate: 8;
+	u32 pu16_intra_dc_delta_rate: 8;
+	u32 pu16_intra_angle_delta_rate: 8;
+	u32 pu32_intra_planar_delta_rate: 8;
+	u32 pu32_intra_dc_delta_rate: 8;
+	u32 pu32_intra_angle_delta_rate: 8;
+	u32 cu08_intra_delta_rate: 8;
+	u32 cu08_inter_delta_rate: 8;
+	u32 cu08_merge_delta_rate: 8;
+	u32 cu16_intra_delta_rate: 8;
+	u32 cu16_inter_delta_rate: 8;
+	u32 cu16_merge_delta_rate: 8;
+	u32 cu32_intra_delta_rate: 8;
+	u32 cu32_inter_delta_rate: 8;
+	u32 cu32_merge_delta_rate: 8;
+	u32 coef_clear_disable: 8;
+	u32 min_qp_i; /* A minimum QP of I picture for rate control */
+	u32 max_qp_i; /* A maximum QP of I picture for rate control */
+	u32 min_qp_p; /* A minimum QP of P picture for rate control */
+	u32 max_qp_p; /* A maximum QP of P picture for rate control */
+	u32 min_qp_b; /* A minimum QP of B picture for rate control */
+	u32 max_qp_b; /* A maximum QP of B picture for rate control */
+	u32 custom_lambda_addr; /* it specifies the address of custom lambda map */
+	u32 user_scaling_list_addr; /* it specifies the address of user scaling list file */
+	u32 avc_idr_period;/* A period of IDR picture (0 ~ 1024). 0 - implies an infinite period */
+	u32 avc_slice_arg;	/* the number of MB for a slice when avc_slice_mode is set with 1 */
 	u32 intra_mb_refresh_mode: 2; /* 0=none, 1=row, 2=column, 3=step-size-in-mb */
 	/**
-	 * Argument for intra_mb_refresh_mode.
+	 * it specifies an intra MB refresh interval. depending on intra_mb_refresh_mode,
+	 * it can mean one of the following.
 	 *
-	 * intra_mb_refresh_mode (1) -> number of consecutive MB rows
-	 * intra_mb_refresh_mode (2) ->the number of consecutive MB columns
-	 * intra_mb_refresh_mode (3) -> step size in MB
+	 * the number of consecutive MB rows for intra_mb_refresh_mode of 1
+	 * the number of consecutive MB columns for intra_mb_refresh_mode of 2
+	 * A step size in MB for intra_mb_refresh_mode of 3
 	 */
 	u32 intra_mb_refresh_arg;
 	u32 rc_weight_param;
@@ -552,26 +641,38 @@ struct enc_wave_param {
 	/* flags */
 	u32 en_still_picture: 1; /* still picture profile */
 	u32 tier: 1; /* 0=main, 1=high */
+	u32 independ_slice_mode : 1; /* 0=no-multi-slice, 1=slice-in-ctu-number*/
 	u32 avc_slice_mode: 1; /* 0=none, 1=slice-in-mb-number */
 	u32 entropy_coding_mode: 1; /* 0=CAVLC, 1=CABAC */
-	u32 lossless_enable: 1; /* enable lossless encoding */
-	u32 const_intra_pred_flag: 1; /* enable constrained intra prediction */
-	u32 tmvp_enable: 1; /* enable temporal motion vector prediction */
+	u32 lossless_enable: 1; /* enables lossless coding */
+	u32 const_intra_pred_flag: 1; /* enables constrained intra prediction */
+	u32 tmvp_enable: 1; /* enables temporal motion vector prediction */
 	u32 wpp_enable: 1;
-	u32 disable_deblk: 1; /* disable in-loop deblocking filtering */
+	u32 disable_deblk: 1; /* it disables in-loop deblocking filtering */
 	u32 lf_cross_slice_boundary_enable: 1;
 	u32 skip_intra_trans: 1;
-	u32 sao_enable: 1; /* enable SAO (sample adaptive offset) */
-	u32 intra_nx_n_enable: 1; /* enables intra nx_n p_us */
-	u32 cu_level_rc_enable: 1; /* enable CU level rate control */
+	u32 sao_enable: 1; /* it enables SAO (sample adaptive offset) */
+	u32 intra_nx_n_enable: 1; /* it enables intra nx_n p_us */
+	u32 cu_level_rc_enable: 1; /* it enable CU level rate control */
 	u32 hvs_qp_enable: 1; /* enable CU QP adjustment for subjective quality enhancement */
-	u32 strong_intra_smooth_enable: 1; /* enable strong intra smoothing */
-	u32 rdo_skip: 1; /* skip RDO (rate distortion optimization) */
-	u32 lambda_scaling_enable: 1; /* enable lambda scaling using custom GOP */
-	u32 transform8x8_enable: 1; /* enable 8x8 intra prediction and 8x8 transform */
-	u32 mb_level_rc_enable: 1; /* enable MB-level rate control */
+	u32 roi_enable: 1; /* it enables ROI map. NOTE: it is valid when rate control is on */
+	u32 nr_y_enable: 1; /* it enables noise reduction algorithm to Y component */
+	u32 nr_noise_est_enable: 1;
+	u32 nr_cb_enable: 1; /* it enables noise reduction algorithm to cb component */
+	u32 nr_cr_enable: 1; /* it enables noise reduction algorithm to cr component */
+	u32 use_long_term: 1; /* it enables long-term reference function */
+	u32 monochrome_enable: 1; /* it enables monochrom encoding mode */
+	u32 strong_intra_smooth_enable: 1; /* it enables strong intra smoothing */
+	u32 weight_pred_enable: 1; /* it enables to use weighted prediction*/
+	u32 bg_detect_enable: 1; /* it enables background detection */
+	u32 custom_lambda_enable: 1; /* it enables custom lambda table */
+	u32 custom_md_enable: 1; /* it enables custom mode decision */
+	u32 rdo_skip: 1; /* it skips RDO(rate distortion optimization) */
+	u32 lambda_scaling_enable: 1; /* it enables lambda scaling using custom GOP */
+	u32 transform8x8_enable: 1; /* it enables 8x8 intra prediction and 8x8 transform */
+	u32 mb_level_rc_enable: 1; /* it enables MB-level rate control */
+	u32 s2fme_disable: 1; /* it disables s2me_fme (only for AVC encoder) */
 };
-
 struct enc_open_param {
 	dma_addr_t bitstream_buffer;
 	unsigned int bitstream_buffer_size;
@@ -581,22 +682,38 @@ struct enc_open_param {
 	u32 vbv_buffer_size;
 	u32 bit_rate; /* target bitrate in bps */
 	struct enc_wave_param wave_param;
+	enum cb_cr_order cbcr_order;
+	unsigned int stream_endian;
+	unsigned int source_endian;
 	enum packed_format_num packed_format; /* <<vpuapi_h_packed_format_num>> */
 	enum frame_buffer_format src_format;
-	bool line_buf_int_en;
+	/* enum frame_buffer_format output_format; not used yet */
+	u32 enc_hrd_rbsp_in_vps; /* it encodes the HRD syntax rbsp into VPS */
+	u32 hrd_rbsp_data_size; /* the bit size of the HRD rbsp data */
+	u32 hrd_rbsp_data_addr; /* the address of the HRD rbsp data */
+	u32 encode_vui_rbsp;
+	u32 vui_rbsp_data_size; /* the bit size of the VUI rbsp data */
+	u32 vui_rbsp_data_addr; /* the address of the VUI rbsp data */
 	u32 pri_ext_addr;
 	u32 pri_axprot;
 	u32 pri_axcache;
+	bool ring_buffer_enable;
+	bool line_buf_int_en;
+	bool enable_pts; /* an enable flag to report PTS(presentation timestamp) */
 	u32 rc_enable : 1; /* rate control */
+	u32 enable_non_ref_fbc_write: 1;
+	u32 sub_frame_sync_enable: 1;
+	u32 sub_frame_sync_mode: 1;
 };
 
 struct enc_initial_info {
-	u32 min_frame_buffer_count; /* minimum number of frame buffers */
-	u32 min_src_frame_count; /* minimum number of source buffers */
-	u32 seq_init_err_reason;
-	u32 warn_info;
-	u32 vlc_buf_size; /* size of task buffer */
-	u32 param_buf_size; /* size of task buffer */
+	u32 min_frame_buffer_count; /* minimum number of frame buffer */
+	u32 min_src_frame_count; /* minimum number of source buffer */
+	u32 max_latency_pictures; /* maximum number of picture latency */
+	u32 seq_init_err_reason; /* error information */
+	u32 warn_info; /* warn information */
+	u32 vlc_buf_size; /* the size of task buffer */
+	u32 param_buf_size; /* the size of task buffer */
 };
 
 /*
@@ -614,14 +731,40 @@ struct enc_code_opt {
 	u32 encode_vui: 1;
 };
 
+struct wave_custom_map_opt {
+	u32 roi_avg_qp; /* it sets an average QP of ROI map */
+	u32 addr_custom_map;
+	u32 custom_roi_map_enable: 1; /* it enables ROI map */
+	u32 custom_lambda_map_enable: 1; /* it enables custom lambda map */
+	u32 custom_mode_map_enable: 1;
+	u32 custom_coef_drop_enable: 1;
+};
+
 struct enc_param {
 	struct frame_buffer *source_frame;
 	u32 pic_stream_buffer_addr;
 	u64 pic_stream_buffer_size;
-	u32 src_idx; /* source frame buffer index */
+	u32 force_pic_qp_i;
+	u32 force_pic_qp_p;
+	u32 force_pic_qp_b;
+	u32 force_pic_type: 2;
+	u32 src_idx; /* A source frame buffer index */
 	struct enc_code_opt code_option;
-	u64 pts; /* presentation timestamp (PTS) of the input source */
+	u32 use_cur_src_as_longterm_pic;
+	u32 use_longterm_ref;
+	u64 pts; /* the presentation timestamp (PTS) of input source */
+	struct wave_custom_map_opt custom_map_opt;
+	u32 wp_pix_sigma_y; /* pixel variance of Y component for weighted prediction */
+	u32 wp_pix_sigma_cb; /* pixel variance of cb component for weighted prediction */
+	u32 wp_pix_sigma_cr; /* pixel variance of cr component for weighted prediction */
+	u32 wp_pix_mean_y; /* pixel mean value of Y component for weighted prediction */
+	u32 wp_pix_mean_cb; /* pixel mean value of cb component for weighted prediction */
+	u32 wp_pix_mean_cr; /* pixel mean value of cr component for weighted prediction */
 	bool src_end_flag;
+	u32 skip_picture: 1;
+	u32 force_pic_qp_enable: 1; /* flag used to force picture quantization parameter */
+	u32 force_pic_type_enable: 1; /* A flag to use a force picture type */
+	u32 force_all_ctu_coef_drop_enable: 1; /* forces all coefficients to be zero after TQ */
 };
 
 struct enc_output_info {
@@ -722,6 +865,7 @@ struct enc_info {
 	enum mirror_direction mirror_direction;
 	unsigned int rotation_angle;
 	bool initial_info_obtained;
+	bool ring_buffer_enable;	
 	struct sec_axi_info sec_axi_info;
 	bool line_buf_int_en;
 	struct vpu_buf vb_work;
@@ -845,6 +989,7 @@ int wave5_vdi_write_memory(struct vpu_device *vpu_dev, struct vpu_buf *vb, size_
 int wave5_vdi_free_dma_memory(struct vpu_device *vpu_dev, struct vpu_buf *vb);
 void wave5_vdi_allocate_sram(struct vpu_device *vpu_dev);
 void wave5_vdi_free_sram(struct vpu_device *vpu_dev);
+unsigned int wave5_vdi_convert_endian(struct vpu_device *vpu_dev, unsigned int endian);
 
 int wave5_vpu_init_with_bitcode(struct device *dev, u8 *bitcode, size_t size);
 int wave5_vpu_flush_instance(struct vpu_instance *inst);

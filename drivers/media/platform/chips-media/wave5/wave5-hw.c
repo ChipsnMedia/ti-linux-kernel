@@ -1105,7 +1105,7 @@ int wave5_vpu_re_init(struct device *dev, u8 *fw, size_t size)
 	return setup_wave5_properties(dev);
 }
 
-static int wave5_vpu_sleep_wake(struct device *dev, bool i_sleep_wake, const uint16_t *code,
+int wave5_vpu_sleep_wake(struct device *dev, bool i_sleep_wake, const uint16_t *code,
 				size_t size)
 {
 	u32 reg_val;
@@ -1164,7 +1164,13 @@ static int wave5_vpu_sleep_wake(struct device *dev, bool i_sleep_wake, const uin
 		wave5_fio_writel(vpu_dev, W5_BACKBONE_PROC_EXT_ADDR, reg_val);
 		wave5_fio_writel(vpu_dev, W5_BACKBONE_AXI_PARAM, 0);
 		vpu_write_reg(vpu_dev, W5_SEC_AXI_PARAM, 0);
-
+		reg_val = ((WAVE5_PROC_AXI_AXPROT & 0x7) << 4) |
+			(WAVE5_PROC_AXI_AXCACHE & 0xF);
+		wave5_fio_writel(vpu_dev, W5_BACKBONE_AXI_PARAM, reg_val);
+		reg_val = ((WAVE5_SEC_AXI_AXPROT & 0x7) << 20) |
+			((WAVE5_SEC_AXI_AXCACHE & 0xF) << 16) |
+			(WAVE5_SEC_AXI_EXT_ADDR & 0xFFFF);
+		vpu_write_reg(vpu_dev, W5_SEC_AXI_PARAM, reg_val);
 		/* Encoder interrupt */
 		reg_val = BIT(INT_WAVE5_ENC_SET_PARAM);
 		reg_val |= BIT(INT_WAVE5_ENC_PIC);
@@ -1555,7 +1561,8 @@ static void wave5_set_enc_crop_info(u32 codec, struct enc_wave_param *param, int
 		param->conf_win_right = crop_top;
 		break;
 	default:
-		WARN(1, "Invalid prp_mode: %d, must be in range of 1 - 15\n", prp_mode);
+		break;
+		
 	}
 }
 
@@ -1565,11 +1572,47 @@ int wave5_vpu_enc_init_seq(struct vpu_instance *inst)
 	struct enc_info *p_enc_info = &inst->codec_info->enc_info;
 	struct enc_open_param *p_open_param = &p_enc_info->open_param;
 	struct enc_wave_param *p_param = &p_open_param->wave_param;
+	int ret;
 
 	/*
 	 * OPT_COMMON:
 	 *	the last SET_PARAM command should be called with OPT_COMMON
 	 */
+	if (p_param->gop_preset_idx == PRESET_IDX_CUSTOM_GOP) {
+		int i = 0, j = 0;
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_CUSTOM_GOP_PARAM,
+			      p_param->gop_param.custom_gop_size);
+		for (i = 0; i < p_param->gop_param.custom_gop_size; i++) {
+			vpu_write_reg(inst->dev, W5_CMD_ENC_CUSTOM_GOP_PIC_PARAM_0 + (i * 4),
+				      p_param->gop_param.pic_param[i].pic_type |
+				      (p_param->gop_param.pic_param[i].poc_offset << 2) |
+				      (p_param->gop_param.pic_param[i].pic_qp << 6) |
+				      (p_param->gop_param.pic_param[i].use_multi_ref_p << 13) |
+				      ((p_param->gop_param.pic_param[i].ref_poc_l0 & 0x1F) << 14) |
+				      ((p_param->gop_param.pic_param[i].ref_poc_l1 & 0x1F) << 19) |
+				      (p_param->gop_param.pic_param[i].temporal_id << 24));
+		}
+
+		for (j = i; j < MAX_GOP_NUM; j++)
+			vpu_write_reg(inst->dev,
+				      W5_CMD_ENC_CUSTOM_GOP_PIC_PARAM_0 + (j * 4), 0);
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_SET_PARAM_OPTION, OPT_CUSTOM_GOP);
+		wave5_bit_issue_command(inst, W5_ENC_SET_PARAM);
+
+		ret = wave5_wait_vpu_busy(inst->dev, W5_VPU_BUSY_STATUS);
+		if (ret) {
+			dev_warn(inst->dev->dev, "command: 'W5_ENC_SET_PARAM', timed out op=0x%x\n",
+				 OPT_CUSTOM_GOP);
+			return ret;
+		}
+	}
+
+	/*======================================================================*/
+	/* OPT_COMMON:								*/
+	/*	the last SET_PARAM command should be called with OPT_COMMON	*/
+	/*======================================================================*/
 	rot_mir_mode = 0;
 	if (p_enc_info->rotation_enable) {
 		switch (p_enc_info->rotation_angle) {
@@ -1614,21 +1657,37 @@ int wave5_vpu_enc_init_seq(struct vpu_instance *inst)
 			| p_open_param->pic_width);
 	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CUSTOM_MAP_ENDIAN, VDI_LITTLE_ENDIAN);
 
-	reg_val = p_param->profile |
-		(p_param->level << 3) |
-		(p_param->internal_bit_depth << 14);
-	if (inst->std == W_HEVC_ENC)
-		reg_val |= (p_param->tier << 12) |
+	if (inst->std == W_AVC_ENC) {
+		reg_val = p_param->profile | (p_param->level << 3) |
+			(p_param->internal_bit_depth << 14) | (p_param->use_long_term << 21);
+		if (p_param->scaling_list_enable == 2) {
+			reg_val |= BIT(22) | BIT(23); // [23]=USE_DEFAULT_SCALING_LIST
+		} else { // 0 or 1
+			reg_val |= (p_param->scaling_list_enable << 22);
+		}
+	} else { // HEVC enc
+		reg_val = p_param->profile |
+			(p_param->level << 3) |
+			(p_param->tier << 12) |
+			(p_param->internal_bit_depth << 14) |
+			(p_param->use_long_term << 21) |
 			(p_param->tmvp_enable << 23) |
 			(p_param->sao_enable << 24) |
 			(p_param->skip_intra_trans << 25) |
 			(p_param->strong_intra_smooth_enable << 27) |
 			(p_param->en_still_picture << 30);
+		if (p_param->scaling_list_enable == 2)
+			reg_val |= BIT(22) | BIT(31); // [31]=USE_DEFAULT_SCALING_LIST
+		else
+			reg_val |= (p_param->scaling_list_enable << 22);
+	}
+
 	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_SPS_PARAM, reg_val);
 
 	reg_val = (p_param->lossless_enable) |
 		(p_param->const_intra_pred_flag << 1) |
 		(p_param->lf_cross_slice_boundary_enable << 2) |
+		(p_param->weight_pred_enable << 3) |
 		(p_param->wpp_enable << 4) |
 		(p_param->disable_deblk << 5) |
 		((p_param->beta_offset_div2 & 0xF) << 6) |
@@ -1644,41 +1703,52 @@ int wave5_vpu_enc_init_seq(struct vpu_instance *inst)
 	if (inst->std == W_AVC_ENC)
 		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_INTRA_PARAM, p_param->intra_qp |
 				((p_param->intra_period & 0x7ff) << 6) |
-				((p_param->avc_idr_period & 0x7ff) << 17));
-	else if (inst->std == W_HEVC_ENC)
+				((p_param->avc_idr_period & 0x7ff) << 17) |
+				((p_param->forced_idr_header_enable & 3) << 28));
+	else
 		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_INTRA_PARAM,
 			      p_param->decoding_refresh_type | (p_param->intra_qp << 3) |
+				(p_param->forced_idr_header_enable << 9) |
 				(p_param->intra_period << 16));
 
-	reg_val = (p_param->rdo_skip << 2) |
+	reg_val = (p_param->use_recommend_enc_param) |
+		(p_param->rdo_skip << 2) |
 		(p_param->lambda_scaling_enable << 3) |
+		(p_param->coef_clear_disable << 4) |
 		(fixed_cu_size_mode << 5) |
 		(p_param->intra_nx_n_enable << 8) |
-		(p_param->max_num_merge << 18);
+		(p_param->max_num_merge << 18) |
+		(p_param->custom_md_enable << 20) |
+		(p_param->custom_lambda_enable << 21) |
+		(p_param->monochrome_enable << 22);
 
 	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_RDO_PARAM, reg_val);
 
 	if (inst->std == W_AVC_ENC)
 		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_INTRA_REFRESH,
 			      p_param->intra_mb_refresh_arg << 16 | p_param->intra_mb_refresh_mode);
-	else if (inst->std == W_HEVC_ENC)
+	else
 		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_INTRA_REFRESH,
 			      p_param->intra_refresh_arg << 16 | p_param->intra_refresh_mode);
 
 	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_RC_FRAME_RATE, p_open_param->frame_rate_info);
 	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_RC_TARGET_RATE, p_open_param->bit_rate);
 
-	reg_val = p_open_param->rc_enable |
-		(p_param->hvs_qp_enable << 2) |
-		(p_param->hvs_qp_scale << 4) |
-		((p_param->initial_rc_qp & 0x3F) << 14) |
-		(p_open_param->vbv_buffer_size << 20);
 	if (inst->std == W_AVC_ENC)
-		reg_val |= (p_param->mb_level_rc_enable << 1);
-	else if (inst->std == W_HEVC_ENC)
-		reg_val |= (p_param->cu_level_rc_enable << 1);
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_RC_PARAM,
+			      p_open_param->rc_enable | (p_param->mb_level_rc_enable << 1) |
+			      (p_param->hvs_qp_enable << 2) | (p_param->hvs_qp_scale << 4) |
+			      (p_param->bit_alloc_mode << 8) | (p_param->roi_enable << 13) |
+			      ((p_param->initial_rc_qp & 0x3F) << 14) |
+			      (p_open_param->vbv_buffer_size << 20));
+	else
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_RC_PARAM,
+			      p_open_param->rc_enable | (p_param->cu_level_rc_enable << 1) |
+			      (p_param->hvs_qp_enable << 2) | (p_param->hvs_qp_scale << 4) |
+			      (p_param->bit_alloc_mode << 8) | (p_param->roi_enable << 13) |
+			      ((p_param->initial_rc_qp & 0x3F) << 14) |
+			      (p_open_param->vbv_buffer_size << 20));
 
-	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_RC_PARAM, 0);
 	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_RC_WEIGHT_PARAM,
 		      p_param->rc_weight_buf << 8 | p_param->rc_weight_param);
 
@@ -1689,26 +1759,101 @@ int wave5_vpu_enc_init_seq(struct vpu_instance *inst)
 		      (p_param->max_qp_p << 6) | (p_param->min_qp_b << 12) |
 		      (p_param->max_qp_b << 18));
 
+	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_RC_BIT_RATIO_LAYER_0_3,
+		      (u32)p_param->fixed_bit_ratio[0] |
+		      ((u32)p_param->fixed_bit_ratio[1] << 8) |
+		      ((u32)p_param->fixed_bit_ratio[2] << 16) |
+		      ((u32)p_param->fixed_bit_ratio[3] << 24));
+
+	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_RC_BIT_RATIO_LAYER_4_7,
+		      (u32)p_param->fixed_bit_ratio[4] |
+		      ((u32)p_param->fixed_bit_ratio[5] << 8) |
+		      ((u32)p_param->fixed_bit_ratio[6] << 16) |
+		      ((u32)p_param->fixed_bit_ratio[7] << 24));
+
 	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_ROT_PARAM, rot_mir_mode);
 
-	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CONF_WIN_TOP_BOT,
-		      p_param->conf_win_bot << 16 | p_param->conf_win_top);
-	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CONF_WIN_LEFT_RIGHT,
-		      p_param->conf_win_right << 16 | p_param->conf_win_left);
+	vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_BG_PARAM, (p_param->bg_detect_enable) |
+		      (p_param->bg_thr_diff << 1) | (p_param->bg_thr_mean_diff << 10) |
+		      (p_param->bg_lambda_qp << 18) | ((p_param->bg_delta_qp & 0x1F) << 24) |
+		      ((inst->std == W_AVC_ENC) ? p_param->s2fme_disable << 29 : 0));
 
-	if (inst->std == W_AVC_ENC)
-		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_INDEPENDENT_SLICE,
-			      p_param->avc_slice_arg << 16 | p_param->avc_slice_mode);
-	else if (inst->std == W_HEVC_ENC)
-		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_INDEPENDENT_SLICE,
-			      p_param->independ_slice_mode_arg << 16 |
-			      p_param->independ_slice_mode);
+	if (inst->std == W_HEVC_ENC || inst->std == W_AVC_ENC) {
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CUSTOM_LAMBDA_ADDR,
+			      p_param->custom_lambda_addr);
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CONF_WIN_TOP_BOT,
+			      p_param->conf_win_bot << 16 | p_param->conf_win_top);
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CONF_WIN_LEFT_RIGHT,
+			      p_param->conf_win_right << 16 | p_param->conf_win_left);
+
+		if (inst->std == W_AVC_ENC)
+			vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_INDEPENDENT_SLICE,
+				      p_param->avc_slice_arg << 16 | p_param->avc_slice_mode);
+		else
+			vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_INDEPENDENT_SLICE,
+				      p_param->independ_slice_mode_arg << 16 |
+				      p_param->independ_slice_mode);
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_USER_SCALING_LIST_ADDR,
+			      p_param->user_scaling_list_addr);
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_NUM_UNITS_IN_TICK,
+			      p_param->num_units_in_tick);
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_TIME_SCALE, p_param->time_scale);
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_NUM_TICKS_POC_DIFF_ONE,
+			      p_param->num_ticks_poc_diff_one);
+	}
 
 	if (inst->std == W_HEVC_ENC) {
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CUSTOM_MD_PU04,
+			      (p_param->pu04_delta_rate & 0xFF) |
+			      ((p_param->pu04_intra_planar_delta_rate & 0xFF) << 8) |
+			      ((p_param->pu04_intra_dc_delta_rate & 0xFF) << 16) |
+			      ((p_param->pu04_intra_angle_delta_rate & 0xFF) << 24));
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CUSTOM_MD_PU08,
+			      (p_param->pu08_delta_rate & 0xFF) |
+			      ((p_param->pu08_intra_planar_delta_rate & 0xFF) << 8) |
+			      ((p_param->pu08_intra_dc_delta_rate & 0xFF) << 16) |
+			      ((p_param->pu08_intra_angle_delta_rate & 0xFF) << 24));
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CUSTOM_MD_PU16,
+			      (p_param->pu16_delta_rate & 0xFF) |
+			      ((p_param->pu16_intra_planar_delta_rate & 0xFF) << 8) |
+			      ((p_param->pu16_intra_dc_delta_rate & 0xFF) << 16) |
+			      ((p_param->pu16_intra_angle_delta_rate & 0xFF) << 24));
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CUSTOM_MD_PU32,
+			      (p_param->pu32_delta_rate & 0xFF) |
+			      ((p_param->pu32_intra_planar_delta_rate & 0xFF) << 8) |
+			      ((p_param->pu32_intra_dc_delta_rate & 0xFF) << 16) |
+			      ((p_param->pu32_intra_angle_delta_rate & 0xFF) << 24));
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CUSTOM_MD_CU08,
+			      (p_param->cu08_intra_delta_rate & 0xFF) |
+			      ((p_param->cu08_inter_delta_rate & 0xFF) << 8) |
+			      ((p_param->cu08_merge_delta_rate & 0xFF) << 16));
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CUSTOM_MD_CU16,
+			      (p_param->cu16_intra_delta_rate & 0xFF) |
+			      ((p_param->cu16_inter_delta_rate & 0xFF) << 8) |
+			      ((p_param->cu16_merge_delta_rate & 0xFF) << 16));
+
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_CUSTOM_MD_CU32,
+			      (p_param->cu32_intra_delta_rate & 0xFF) |
+			      ((p_param->cu32_inter_delta_rate & 0xFF) << 8) |
+			      ((p_param->cu32_merge_delta_rate & 0xFF) << 16));
+
 		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_DEPENDENT_SLICE,
 			      p_param->depend_slice_mode_arg << 16 | p_param->depend_slice_mode);
 
-		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_NR_PARAM, 0);
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_NR_PARAM, p_param->nr_y_enable |
+			      (p_param->nr_cb_enable << 1) | (p_param->nr_cr_enable << 2) |
+			      (p_param->nr_noise_est_enable << 3) |
+			      (p_param->nr_noise_sigma_y << 4) |
+			      (p_param->nr_noise_sigma_cb << 12) |
+			      (p_param->nr_noise_sigma_cr << 20));
 
 		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_NR_WEIGHT,
 			      p_param->nr_intra_weight_y |
@@ -1717,6 +1862,19 @@ int wave5_vpu_enc_init_seq(struct vpu_instance *inst)
 			      (p_param->nr_inter_weight_y << 15) |
 			      (p_param->nr_inter_weight_cb << 20) |
 			      (p_param->nr_inter_weight_cr << 25));
+	}
+	if (p_enc_info->open_param.encode_vui_rbsp || p_enc_info->open_param.enc_hrd_rbsp_in_vps) {
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_VUI_HRD_PARAM,
+			      (p_enc_info->open_param.hrd_rbsp_data_size << 18) |
+			      (p_enc_info->open_param.vui_rbsp_data_size << 4) |
+			      (p_enc_info->open_param.enc_hrd_rbsp_in_vps << 2) |
+			      (p_enc_info->open_param.encode_vui_rbsp));
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_VUI_RBSP_ADDR,
+			      p_enc_info->open_param.vui_rbsp_data_addr);
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_HRD_RBSP_ADDR,
+			      p_enc_info->open_param.hrd_rbsp_data_addr);
+	} else {
+		vpu_write_reg(inst->dev, W5_CMD_ENC_SEQ_VUI_HRD_PARAM, 0);
 	}
 
 	return send_firmware_command(inst, W5_ENC_SET_PARAM, true, NULL, NULL);
@@ -1976,7 +2134,7 @@ free_vb_fbc_y_tbl:
 int wave5_vpu_encode(struct vpu_instance *inst, struct enc_param *option, u32 *fail_res)
 {
 	u32 src_frame_format;
-	u32 reg_val = 0;
+	u32 reg_val = 0, bs_endian;
 	u32 src_stride_c = 0;
 	struct enc_info *p_enc_info = &inst->codec_info->enc_info;
 	struct frame_buffer *p_src_frame = option->source_frame;
@@ -2021,15 +2179,26 @@ int wave5_vpu_encode(struct vpu_instance *inst, struct enc_param *option, u32 *f
 			      (option->code_option.encode_eos << 6) |
 			      (option->code_option.encode_eob << 7));
 
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_PIC_PARAM, option->skip_picture |
+		      (option->force_pic_qp_enable << 1) | (option->force_pic_qp_i << 2) |
+		      (option->force_pic_qp_p << 8) | (option->force_pic_qp_b << 14) |
+		      (option->force_pic_type_enable << 20) | (option->force_pic_type << 21) |
+		      (option->force_all_ctu_coef_drop_enable << 24));
+
 	if (option->src_end_flag)
-		/* no more source images. */
+		// no more source images.
 		vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_PIC_IDX, 0xFFFFFFFF);
 	else
 		vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_PIC_IDX, option->src_idx);
 
 	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_ADDR_Y, p_src_frame->buf_y);
-	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_ADDR_U, p_src_frame->buf_cb);
-	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_ADDR_V, p_src_frame->buf_cr);
+	if (p_open_param->cbcr_order == CBCR_ORDER_NORMAL) {
+		vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_ADDR_U, p_src_frame->buf_cb);
+		vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_ADDR_V, p_src_frame->buf_cr);
+	} else {
+		vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_ADDR_U, p_src_frame->buf_cr);
+		vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_ADDR_V, p_src_frame->buf_cb);
+	}
 
 	switch (p_open_param->src_format) {
 	case FORMAT_420:
@@ -2119,10 +2288,38 @@ int wave5_vpu_encode(struct vpu_instance *inst, struct enc_param *option, u32 *f
 		break;
 	}
 
+	reg_val = wave5_vdi_convert_endian(inst->dev, p_open_param->source_endian);
+	bs_endian = (~reg_val & VDI_128BIT_ENDIAN_MASK);
+
 	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_STRIDE,
 		      (p_src_frame->stride << 16) | src_stride_c);
 	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SRC_FORMAT, src_frame_format |
-		      (format_no << 3) | (justified << 5) | (PIC_SRC_ENDIANNESS_BIG_ENDIAN << 6));
+		      (format_no << 3) | (justified << 5) | (bs_endian << 6));
+
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_CUSTOM_MAP_OPTION_ADDR,
+		      option->custom_map_opt.addr_custom_map);
+
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_CUSTOM_MAP_OPTION_PARAM,
+		      option->custom_map_opt.custom_roi_map_enable |
+		      (option->custom_map_opt.roi_avg_qp << 1) |
+		      (option->custom_map_opt.custom_lambda_map_enable << 8) |
+		      (option->custom_map_opt.custom_mode_map_enable << 9) |
+		      (option->custom_map_opt.custom_coef_drop_enable << 10));
+
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_LONGTERM_PIC,
+		      option->use_cur_src_as_longterm_pic | (option->use_longterm_ref << 1));
+
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_WP_PIXEL_SIGMA_Y, option->wp_pix_sigma_y);
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_WP_PIXEL_SIGMA_C,
+		      (option->wp_pix_sigma_cr << 16) | option->wp_pix_sigma_cb);
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_WP_PIXEL_MEAN_Y, option->wp_pix_mean_y);
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_WP_PIXEL_MEAN_C,
+		      (option->wp_pix_mean_cr << 16) | (option->wp_pix_mean_cb));
+
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_PREFIX_SEI_INFO, 0);
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_PREFIX_SEI_NAL_ADDR, 0);
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SUFFIX_SEI_INFO, 0);
+	vpu_write_reg(inst->dev, W5_CMD_ENC_PIC_SUFFIX_SEI_NAL_ADDR, 0);
 
 	ret = send_firmware_command(inst, W5_DEC_ENC_PIC, true, &reg_val, fail_res);
 	if (ret == -ETIMEDOUT)

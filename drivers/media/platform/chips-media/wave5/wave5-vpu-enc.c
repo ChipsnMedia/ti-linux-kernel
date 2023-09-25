@@ -4,7 +4,7 @@
  *
  * Copyright (C) 2021 CHIPS&MEDIA INC
  */
-
+#include <linux/pm_runtime.h>
 #include "wave5-helper.h"
 
 #define VPU_ENC_DEV_NAME "C&M Wave5 VPU encoder"
@@ -211,7 +211,6 @@ static int start_encode(struct vpu_instance *inst, u32 *fail_res)
 
 	memset(&pic_param, 0, sizeof(struct enc_param));
 	memset(&frame_buf, 0, sizeof(struct frame_buffer));
-
 	dst_buf = v4l2_m2m_next_dst_buf(m2m_ctx);
 	if (!dst_buf) {
 		dev_dbg(inst->dev->dev, "%s: No destination buffer found\n", __func__);
@@ -1209,7 +1208,6 @@ static void wave5_vpu_enc_buf_queue(struct vb2_buffer *vb)
 		vbuf->sequence = inst->queued_src_buf_num++;
 	else
 		vbuf->sequence = inst->queued_dst_buf_num++;
-
 	v4l2_m2m_buf_queue(m2m_ctx, vbuf);
 }
 
@@ -1244,6 +1242,8 @@ static void wave5_set_enc_openparam(struct enc_open_param *open_param,
 	open_param->wave_param.rdo_skip = 1;
 	open_param->wave_param.lambda_scaling_enable = 1;
 
+	open_param->stream_endian = VPU_STREAM_ENDIAN;
+	open_param->source_endian = VPU_SOURCE_ENDIAN;
 	open_param->line_buf_int_en = true;
 	open_param->pic_width = inst->dst_fmt.width;
 	open_param->pic_height = inst->dst_fmt.height;
@@ -1409,12 +1409,17 @@ static int wave5_vpu_enc_start_streaming(struct vb2_queue *q, unsigned int count
 	int ret;
 
 	v4l2_m2m_update_start_streaming_state(m2m_ctx, q);
-
 	if (inst->state == VPU_INST_STATE_NONE && q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 		struct enc_open_param open_param;
-
+		int err = 0;
 		memset(&open_param, 0, sizeof(struct enc_open_param));
-
+		err = pm_runtime_resume_and_get(inst->dev->dev);
+		if (err) {
+			dev_err(inst->dev->dev, "encoder runtime resume failed %d\n",err);
+			ret = -EINVAL;
+			return ret;
+		}
+		
 		inst->std = wave5_to_vpu_std(inst->dst_fmt.pixelformat, inst->type);
 		if (inst->std == STD_UNKNOWN) {
 			dev_warn(inst->dev->dev, "unsupported pixelformat: %.4s\n",
@@ -1423,7 +1428,6 @@ static int wave5_vpu_enc_start_streaming(struct vb2_queue *q, unsigned int count
 		}
 
 		wave5_set_enc_openparam(&open_param, inst);
-
 		ret = wave5_vpu_enc_open(inst, &open_param);
 		if (ret) {
 			dev_dbg(inst->dev->dev, "%s: wave5_vpu_enc_open, fail: %d\n",
@@ -1440,7 +1444,6 @@ static int wave5_vpu_enc_start_streaming(struct vb2_queue *q, unsigned int count
 			wave5_vpu_enc_give_command(inst, ENABLE_ROTATION, NULL);
 			wave5_vpu_enc_give_command(inst, SET_ROTATION_ANGLE, &inst->rot_angle);
 		}
-
 		switch_state(inst, VPU_INST_STATE_OPEN);
 	}
 	if (inst->state == VPU_INST_STATE_OPEN && m2m_ctx->cap_q_ctx.q.streaming) {
@@ -1836,7 +1839,6 @@ static int wave5_vpu_open_enc(struct file *filp)
 	}
 
 	wave5_vdi_allocate_sram(inst->dev);
-
 	return 0;
 
 cleanup_inst:

@@ -4,7 +4,7 @@
  *
  * Copyright (C) 2021 CHIPS&MEDIA INC
  */
-
+#include <linux/pm_runtime.h>
 #include "wave5-helper.h"
 
 #define VPU_DEC_DEV_NAME "C&M Wave5 VPU decoder"
@@ -1412,6 +1412,12 @@ static int wave5_vpu_dec_start_streaming(struct vb2_queue *q, unsigned int count
 		struct dec_open_param open_param;
 
 		memset(&open_param, 0, sizeof(struct dec_open_param));
+		int err = pm_runtime_resume_and_get(inst->dev->dev);
+		if (err) {
+			dev_err(inst->dev->dev, "decoder runtime resume failed %d\n",err);
+			ret = -EINVAL;
+			goto pm_runtime_resume_error;
+		}
 
 		ret = wave5_vpu_dec_allocate_ring_buffer(inst);
 		if (ret)
@@ -1456,6 +1462,7 @@ static int wave5_vpu_dec_start_streaming(struct vb2_queue *q, unsigned int count
 
 free_bitstream_vbuf:
 	wave5_vdi_free_dma_memory(inst->dev, &inst->bitstream_vbuf);
+pm_runtime_resume_error:
 cleanup_dst_buffers:
 	while ((buf = v4l2_m2m_dst_buf_remove(m2m_ctx)))
 		v4l2_m2m_buf_done(buf, VB2_BUF_STATE_QUEUED);

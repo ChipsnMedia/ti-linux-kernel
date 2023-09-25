@@ -6,6 +6,7 @@
  */
 
 #include <linux/bug.h>
+#include <linux/pm_runtime.h>
 #include "wave5-vpuapi.h"
 #include "wave5-regdefine.h"
 #include "wave5.h"
@@ -224,9 +225,11 @@ int wave5_vpu_dec_close(struct vpu_instance *inst, u32 *fail_res)
 		if (ret)
 			break;
 	}
-
+	
 	wave5_vdi_free_dma_memory(vpu_dev, &p_dec_info->vb_task);
-
+       
+       if(!pm_runtime_suspended(inst->dev->dev))
+               pm_runtime_put_sync(inst->dev->dev);
 unlock_and_return:
 	mutex_unlock(&vpu_dev->hw_lock);
 
@@ -728,7 +731,8 @@ int wave5_vpu_enc_close(struct vpu_instance *inst, u32 *fail_res)
 	}
 
 	wave5_vdi_free_dma_memory(vpu_dev, &p_enc_info->vb_task);
-
+	if(!pm_runtime_suspended(inst->dev->dev))
+        	pm_runtime_put_sync(inst->dev->dev);
 	mutex_unlock(&vpu_dev->hw_lock);
 
 	return 0;
@@ -799,18 +803,26 @@ static int wave5_check_enc_param(struct vpu_instance *inst, struct enc_param *pa
 	if (!param)
 		return -EINVAL;
 
-	if (!param->source_frame)
+	if (!param->skip_picture && !param->source_frame)
 		return -EINVAL;
 
 	if (p_enc_info->open_param.bit_rate == 0 && inst->std == W_HEVC_ENC) {
-		if (param->pic_stream_buffer_addr % 16 || param->pic_stream_buffer_size == 0)
+		if (param->force_pic_qp_enable &&
+		    (param->force_pic_qp_i > MAX_INTRA_QP || param->force_pic_qp_p > MAX_INTRA_QP ||
+		     param->force_pic_qp_b > MAX_INTRA_QP))
+			return -EINVAL;
+		if (!p_enc_info->ring_buffer_enable &&
+		    (param->pic_stream_buffer_addr % 16 || param->pic_stream_buffer_size == 0))
 			return -EINVAL;
 	}
-	if (param->pic_stream_buffer_addr % 8 || param->pic_stream_buffer_size == 0)
+	if (!p_enc_info->ring_buffer_enable &&
+	    (param->pic_stream_buffer_addr % 8 || param->pic_stream_buffer_size == 0))
 		return -EINVAL;
 
 	return 0;
 }
+
+
 
 int wave5_vpu_enc_start_one_frame(struct vpu_instance *inst, struct enc_param *param, u32 *fail_res)
 {
