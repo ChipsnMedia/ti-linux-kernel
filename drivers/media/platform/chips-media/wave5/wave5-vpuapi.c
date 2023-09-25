@@ -174,12 +174,9 @@ static int reset_auxiliary_buffers(struct vpu_instance *inst, unsigned int index
 {
 	struct dec_info *p_dec_info = &inst->codec_info->dec_info;
 
-	if (index >= MAX_REG_FRAME)
+	if (index >= MAX_REG_FRAME) {
 		return -EINVAL;
-
-	if (p_dec_info->vb_mv[index].size == 0 && p_dec_info->vb_fbc_y_tbl[index].size == 0 &&
-	    p_dec_info->vb_fbc_c_tbl[index].size == 0)
-		return -EINVAL;
+	}
 
 	wave5_vdi_free_dma_memory(inst->dev, &p_dec_info->vb_mv[index]);
 	wave5_vdi_free_dma_memory(inst->dev, &p_dec_info->vb_fbc_y_tbl[index]);

@@ -70,6 +70,41 @@ static const struct vpu_format enc_fmt_list[FMT_TYPES][MAX_FMTS] = {
 			.max_height = W5_MAX_ENC_PIC_HEIGHT,
 			.min_height = W5_MIN_ENC_PIC_HEIGHT,
 		},
+		{
+			.v4l2_pix_fmt = V4L2_PIX_FMT_YUV422P,
+			.max_width = W5_MAX_ENC_PIC_WIDTH,
+			.min_width = W5_MIN_ENC_PIC_WIDTH,
+			.max_height = W5_MAX_ENC_PIC_HEIGHT,
+			.min_height = W5_MIN_ENC_PIC_HEIGHT,
+		},
+		{
+			.v4l2_pix_fmt = V4L2_PIX_FMT_NV16,
+			.max_width = W5_MAX_ENC_PIC_WIDTH,
+			.min_width = W5_MIN_ENC_PIC_WIDTH,
+			.max_height = W5_MAX_ENC_PIC_HEIGHT,
+			.min_height = W5_MIN_ENC_PIC_HEIGHT,
+		},
+		{
+			.v4l2_pix_fmt = V4L2_PIX_FMT_NV61,
+			.max_width = W5_MAX_ENC_PIC_WIDTH,
+			.min_width = W5_MIN_ENC_PIC_WIDTH,
+			.max_height = W5_MAX_ENC_PIC_HEIGHT,
+			.min_height = W5_MIN_ENC_PIC_HEIGHT,
+		},
+		{
+			.v4l2_pix_fmt = V4L2_PIX_FMT_NV16M,
+			.max_width = W5_MAX_ENC_PIC_WIDTH,
+			.min_width = W5_MIN_ENC_PIC_WIDTH,
+			.max_height = W5_MAX_ENC_PIC_HEIGHT,
+			.min_height = W5_MIN_ENC_PIC_HEIGHT,
+		},
+		{
+			.v4l2_pix_fmt = V4L2_PIX_FMT_NV61M,
+			.max_width = W5_MAX_ENC_PIC_WIDTH,
+			.min_width = W5_MIN_ENC_PIC_WIDTH,
+			.max_height = W5_MAX_ENC_PIC_HEIGHT,
+			.min_height = W5_MIN_ENC_PIC_HEIGHT,
+		},
 	}
 };
 
@@ -135,6 +170,23 @@ static void wave5_update_pix_fmt(struct v4l2_pix_format_mplane *pix_mp, unsigned
 		pix_mp->plane_fmt[0].sizeimage = round_up(width, 32) * height;
 		pix_mp->plane_fmt[1].bytesperline = round_up(width, 32);
 		pix_mp->plane_fmt[1].sizeimage = round_up(width, 32) * height / 2;
+		break;
+	case V4L2_PIX_FMT_YUV422P:
+	case V4L2_PIX_FMT_NV16:
+	case V4L2_PIX_FMT_NV61:
+		pix_mp->width = width;
+		pix_mp->height = height;
+		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[0].sizeimage = round_up(width, 32) * height * 2;
+		break;
+	case V4L2_PIX_FMT_NV16M:
+	case V4L2_PIX_FMT_NV61M:
+		pix_mp->width = width;
+		pix_mp->height = height;
+		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[0].sizeimage = round_up(width, 32) * height;
+		pix_mp->plane_fmt[1].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[1].sizeimage = round_up(width, 32) * height;
 		break;
 	default:
 		pix_mp->width = width;
@@ -556,11 +608,15 @@ static int wave5_vpu_enc_s_fmt_out(struct file *file, void *fh, struct v4l2_form
 	}
 
 	if (inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV12 ||
-	    inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV12M) {
+		inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV12M ||
+		inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV16 ||
+		inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV16M) {
 		inst->cbcr_interleave = true;
 		inst->nv21 = false;
 	} else if (inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV21 ||
-		   inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV21M) {
+		   inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV21M ||
+		   inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV61 ||
+		   inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV61M) {
 		inst->cbcr_interleave = true;
 		inst->nv21 = true;
 	} else {
@@ -1157,6 +1213,16 @@ static void wave5_set_enc_openparam(struct enc_open_param *open_param,
 	struct enc_wave_param input = inst->enc_param;
 	u32 num_ctu_row = ALIGN(inst->dst_fmt.height, 64) / 64;
 	u32 num_mb_row = ALIGN(inst->dst_fmt.height, 16) / 16;
+
+	if (inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV16 ||
+		inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV61 ||
+		inst->src_fmt.pixelformat == V4L2_PIX_FMT_YUV422P ||
+		inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV16M ||
+		inst->src_fmt.pixelformat == V4L2_PIX_FMT_NV61M) {
+		open_param->src_format = FORMAT_422;
+	} else {
+		open_param->src_format = FORMAT_420;
+	}
 
 	open_param->wave_param.gop_preset_idx = PRESET_IDX_IPP_SINGLE;
 	open_param->wave_param.hvs_qp_scale = 2;
