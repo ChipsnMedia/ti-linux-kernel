@@ -2,7 +2,7 @@
 /*
  * Wave5 series multi-standard codec IP - helper functions
  *
- * Copyright (C) 2021 CHIPS&MEDIA INC
+ * Copyright (C) 2021-2023 CHIPS&MEDIA INC
  */
 
 #include <linux/bug.h>
@@ -175,11 +175,11 @@ static int reset_auxiliary_buffers(struct vpu_instance *inst, unsigned int index
 	struct dec_info *p_dec_info = &inst->codec_info->dec_info;
 
 	if (index >= MAX_REG_FRAME)
-		return -EINVAL;
+		return 1;
 
 	if (p_dec_info->vb_mv[index].size == 0 && p_dec_info->vb_fbc_y_tbl[index].size == 0 &&
 	    p_dec_info->vb_fbc_c_tbl[index].size == 0)
-		return -EINVAL;
+		return 1;
 
 	wave5_vdi_free_dma_memory(inst->dev, &p_dec_info->vb_mv[index]);
 	wave5_vdi_free_dma_memory(inst->dev, &p_dec_info->vb_fbc_y_tbl[index]);
@@ -224,8 +224,10 @@ int wave5_vpu_dec_close(struct vpu_instance *inst, u32 *fail_res)
 
 	for (i = 0 ; i < MAX_REG_FRAME; i++) {
 		ret = reset_auxiliary_buffers(inst, i);
-		if (ret)
+		if (ret) {
+			ret = 0;
 			break;
+		}
 	}
 
 	wave5_vdi_free_dma_memory(vpu_dev, &p_dec_info->vb_task);
@@ -570,7 +572,7 @@ err_out:
 int wave5_vpu_dec_clr_disp_flag(struct vpu_instance *inst, int index)
 {
 	struct dec_info *p_dec_info = &inst->codec_info->dec_info;
-	int ret = 0;
+	int ret;
 	struct vpu_device *vpu_dev = inst->dev;
 
 	if (index >= p_dec_info->num_of_display_fbs)
@@ -658,7 +660,7 @@ int wave5_vpu_dec_give_command(struct vpu_instance *inst, enum codec_command cmd
 		return -EINVAL;
 	}
 
-	return 0;
+	return ret;
 }
 
 int wave5_vpu_enc_open(struct vpu_instance *inst, struct enc_open_param *open_param)
