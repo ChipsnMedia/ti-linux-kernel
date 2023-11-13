@@ -405,8 +405,8 @@
 		status = "disabled";
 	};
 
-    vpu: video-codec@4210000 {
-		compatible = "cnm,cm521c-vpu";
+	vpu: video-codec@4210000 {
+		compatible = "ti,k3-j721s2-wave521c", "cnm,wave521c";
 		reg = <0x00 0x4210000 0x00 0x10000>;
 		interrupts = <GIC_SPI 182 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&k3_clks 179 2>;
