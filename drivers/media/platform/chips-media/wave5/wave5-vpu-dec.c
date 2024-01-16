@@ -1350,6 +1350,7 @@ static int fill_ringbuffer(struct vpu_instance *inst)
 			break;
 		}
 
+		inst->queuing_num++;
 		feeded = true;
 		break;
 	}
@@ -1526,6 +1527,7 @@ static int streamoff_output(struct vb2_queue *q)
 	struct vpu_timestamp_list *tmp;
 
 	inst->retry = FALSE;
+	inst->queuing_num = 0;
 	list_for_each_entry_safe(ts, tmp, &inst->ts_list, list) {
 		list_del_init(&inst->ts_list);
 		kfree(ts);
@@ -1723,7 +1725,7 @@ static void wave5_vpu_dec_device_run(void *priv)
 			dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
 			goto finish_job_and_return;
 		}
-               else if(ret == 1 && !inst->eos) {
+               else if(ret == 1 && !inst->eos && inst->queuing_num == 0) {
                        dev_dbg(inst->dev->dev, "%s: there is no bitstream for feeding, so skip ", __func__);
                        goto finish_job_and_return;
                }
@@ -1800,8 +1802,10 @@ static void wave5_vpu_dec_device_run(void *priv)
 		}
 		if (fail_res == WAVE5_SYSERR_QUEUEING_FAIL)
 			inst->retry = TRUE;
-		else
+		else {
 			inst->retry = FALSE;
+			inst->queuing_num--;
+		}
 
 		return;
 	default:

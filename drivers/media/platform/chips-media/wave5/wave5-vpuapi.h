@@ -813,6 +813,7 @@ struct vpu_instance {
 	bool nv21;
 	bool eos;
 	bool retry;
+	int queuing_num;
 	struct mutex feed_lock;
 	struct vpu_buf bitstream_vbuf;
 	dma_addr_t last_rd_ptr;
