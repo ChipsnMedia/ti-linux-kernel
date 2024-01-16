@@ -49,7 +49,7 @@
 /************************************************************************/
 #define VLC_BUF_NUM                     (2)
 
-#define COMMAND_QUEUE_DEPTH             (2)
+#define COMMAND_QUEUE_DEPTH             (4)
 
 #define W5_REMAP_INDEX0                 0
 #define W5_REMAP_INDEX1                 1

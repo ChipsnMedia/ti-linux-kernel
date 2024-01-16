@@ -5,6 +5,7 @@
  * Copyright (C) 2021-2023 CHIPS&MEDIA INC
  */
 
+
 #include <linux/pm_runtime.h>
 #include "wave5-helper.h"
 
@@ -205,6 +206,7 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 		consumed_bytes);
 
 	v4l2_m2m_for_each_src_buf_safe(m2m_ctx, buf, n) {
+		struct vpu_timestamp_list *ts;
 		struct vb2_v4l2_buffer *src_buf = &buf->vb;
 		size_t src_size = vb2_get_plane_payload(&src_buf->vb2_buf, 0);
 
@@ -215,6 +217,11 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 			__func__, src_buf->vb2_buf.index);
 		src_buf = v4l2_m2m_src_buf_remove(m2m_ctx);
 		inst->timestamp = src_buf->vb2_buf.timestamp;
+		ts = kzalloc(sizeof(*ts), GFP_KERNEL);
+		INIT_LIST_HEAD(&ts->list);
+		ts->timestamp = inst->timestamp;
+		list_add_tail(&inst->ts_list, &ts->list);
+
 		v4l2_m2m_buf_done(src_buf, VB2_BUF_STATE_DONE);
 		consumed_bytes -= src_size;
 
@@ -243,54 +250,54 @@ static void wave5_update_pix_fmt(struct v4l2_pix_format_mplane *pix_mp, unsigned
 	case V4L2_PIX_FMT_NV21:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
-		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height * 3 / 2;
+		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[0].sizeimage = width * height * 3 / 2;
 		break;
 	case V4L2_PIX_FMT_YUV422P:
 	case V4L2_PIX_FMT_NV16:
 	case V4L2_PIX_FMT_NV61:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
-		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height * 2;
+		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[0].sizeimage = width * height * 2;
 		break;
 	case V4L2_PIX_FMT_YUV420M:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
-		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height;
-		pix_mp->plane_fmt[1].bytesperline = pix_mp->width / 2;
-		pix_mp->plane_fmt[1].sizeimage = pix_mp->width * pix_mp->height / 4;
-		pix_mp->plane_fmt[2].bytesperline = pix_mp->width / 2;
-		pix_mp->plane_fmt[2].sizeimage = pix_mp->width * pix_mp->height / 4;
+		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[0].sizeimage = width * height;
+		pix_mp->plane_fmt[1].bytesperline = round_up(width, 32) / 2;
+		pix_mp->plane_fmt[1].sizeimage = width * height / 4;
+		pix_mp->plane_fmt[2].bytesperline = round_up(width, 32) / 2;
+		pix_mp->plane_fmt[2].sizeimage = width * height / 4;
 		break;
 	case V4L2_PIX_FMT_NV12M:
 	case V4L2_PIX_FMT_NV21M:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
-		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height;
-		pix_mp->plane_fmt[1].bytesperline = pix_mp->width;
-		pix_mp->plane_fmt[1].sizeimage = pix_mp->width * pix_mp->height / 2;
+		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[0].sizeimage = width * height;
+		pix_mp->plane_fmt[1].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[1].sizeimage = width * height / 2;
 		break;
 	case V4L2_PIX_FMT_YUV422M:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
-		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height;
-		pix_mp->plane_fmt[1].bytesperline = pix_mp->width / 2;
-		pix_mp->plane_fmt[1].sizeimage = pix_mp->width * pix_mp->height / 2;
-		pix_mp->plane_fmt[2].bytesperline = pix_mp->width / 2;
-		pix_mp->plane_fmt[2].sizeimage = pix_mp->width * pix_mp->height / 2;
+		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[0].sizeimage = width * height;
+		pix_mp->plane_fmt[1].bytesperline = round_up(width, 32) / 2;
+		pix_mp->plane_fmt[1].sizeimage = width * height / 2;
+		pix_mp->plane_fmt[2].bytesperline = round_up(width, 32) / 2;
+		pix_mp->plane_fmt[2].sizeimage = width * height / 2;
 		break;
 	case V4L2_PIX_FMT_NV16M:
 	case V4L2_PIX_FMT_NV61M:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
-		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height;
-		pix_mp->plane_fmt[1].bytesperline = pix_mp->width;
-		pix_mp->plane_fmt[1].sizeimage = pix_mp->width * pix_mp->height;
+		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[0].sizeimage = width * height;
+		pix_mp->plane_fmt[1].bytesperline = round_up(width, 32);
+		pix_mp->plane_fmt[1].sizeimage = width * height;
 		break;
 	default:
 		pix_mp->width = width;
@@ -316,10 +323,10 @@ static int start_decode(struct vpu_instance *inst, u32 *fail_res)
 			v4l2_m2m_buf_done(src_buf, VB2_BUF_STATE_ERROR);
 		switch_state(inst, VPU_INST_STATE_STOP);
 
-		dev_dbg(inst->dev->dev, "%s: pic run failed / finish job", __func__);
-		v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
+		dev_err(inst->dev->dev, "%s: pic run failed / finish job", __func__);
+	//	v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 	}
-
+	v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 	return ret;
 }
 
@@ -428,7 +435,9 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 
 	dev_dbg(inst->dev->dev, "%s: rd_ptr %pad wr_ptr %pad", __func__, &dec_info.rd_ptr,
 		&dec_info.wr_ptr);
+	mutex_lock(&inst->feed_lock);
 	wave5_handle_src_buffer(inst, dec_info.rd_ptr);
+	mutex_unlock(&inst->feed_lock);
 
 	dev_dbg(inst->dev->dev, "%s: dec_info dec_idx %i disp_idx %i", __func__,
 		dec_info.index_frame_decoded, dec_info.index_frame_display);
@@ -448,6 +457,13 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		if (vb) {
 			dec_buf = to_vb2_v4l2_buffer(vb);
 			dec_buf->vb2_buf.timestamp = inst->timestamp;
+			struct vpu_timestamp_list *ts =   list_first_entry(&inst->ts_list, struct vpu_timestamp_list, list);
+			if (ts) {
+				list_del_init(&inst->ts_list);
+				//printk("ts : %lld 	%lld\n",ts->timestamp,inst->timestamp);
+				dec_buf->vb2_buf.timestamp = ts->timestamp;
+				kfree(ts);
+			}
 		} else {
 			dev_warn(inst->dev->dev, "%s: invalid decoded frame index %i",
 				 __func__, dec_info.index_frame_decoded);
@@ -515,12 +531,14 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 	 * the reorder queue regardless of having a matching decoding operation
 	 * pending. Only terminate the job if there are no more IRQ coming.
 	 */
+#if 0	
 	wave5_vpu_dec_give_command(inst, DEC_GET_QUEUE_STATUS, &q_status);
 	if (q_status.report_queue_count == 0 &&
 	    (q_status.instance_queue_count == 0 || dec_info.sequence_changed)) {
 		dev_dbg(inst->dev->dev, "%s: finishing job.\n", __func__);
 		v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 	}
+#endif	
 }
 
 static int wave5_vpu_dec_querycap(struct file *file, void *fh, struct v4l2_capability *cap)
@@ -840,6 +858,36 @@ static int wave5_vpu_dec_s_selection(struct file *file, void *fh, struct v4l2_se
 	return 0;
 }
 
+
+static int fill_ringbuffer(struct vpu_instance *inst);
+
+static void wave5_vpu_dec_feed_remaining(struct vpu_instance *inst)
+{
+       int ret = 0;
+       struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
+       u32 fail_res = 0;
+       printk("wave5_vpu_dec_feed_remaining 1 \n");
+#if 1
+       ret = fill_ringbuffer(inst);
+       if (ret) {
+               dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
+               return;
+       }
+       printk("wave5_vpu_dec_feed_remaining 2 \n");
+
+       ret = start_decode(inst, &fail_res);
+       if (ret) {
+               dev_err(inst->dev->dev,
+                       "Frame decoding on m2m context (%p), fail: %d (result: %d)\n",
+                       m2m_ctx, ret, fail_res);
+       }
+#endif
+       /* Return so that we leave this job active */
+       printk("wave5_vpu_dec_feed_remaining 3\n");
+}
+
+
+
 static int wave5_vpu_dec_stop(struct vpu_instance *inst)
 {
 	int ret = 0;
@@ -854,11 +902,26 @@ static int wave5_vpu_dec_stop(struct vpu_instance *inst)
 	}
 
 	if (inst->state != VPU_INST_STATE_NONE) {
+               struct vb2_v4l2_buffer *vbuf;
+               struct vpu_src_buffer *vpu_buf;
+
 		/*
 		 * Temporarily release the state_spinlock so that subsequent
 		 * calls do not block on a mutex while inside this spinlock.
 		 */
 		spin_unlock_irqrestore(&inst->state_spinlock, flags);
+
+               	vbuf = v4l2_m2m_last_src_buf(m2m_ctx);
+               	if (vbuf) {
+                       vpu_buf = wave5_to_vpu_src_buf(vbuf);
+                       if (vpu_buf->consumed == false) {
+                               printk("the last buffer is not consumed yet 1111\n");
+                               mutex_lock(&inst->feed_lock);
+                               wave5_vpu_dec_feed_remaining(inst);
+                               mutex_unlock(&inst->feed_lock);
+                       }
+               	}
+
 		ret = wave5_vpu_dec_set_eos_on_firmware(inst);
 		if (ret)
 			return ret;
@@ -1003,7 +1066,6 @@ static int wave5_vpu_dec_queue_setup(struct vb2_queue *q, unsigned int *num_buff
 	struct vpu_instance *inst = vb2_get_drv_priv(q);
 	struct v4l2_pix_format_mplane inst_format =
 		(q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) ? inst->src_fmt : inst->dst_fmt;
-	unsigned int i;
 
 	dev_dbg(inst->dev->dev, "%s: num_buffers: %u | num_planes: %u | type: %u\n", __func__,
 		*num_buffers, *num_planes, q->type);
@@ -1017,9 +1079,31 @@ static int wave5_vpu_dec_queue_setup(struct vb2_queue *q, unsigned int *num_buff
 		if (*num_buffers < inst->fbc_buf_count)
 			*num_buffers = inst->fbc_buf_count;
 
-		for (i = 0; i < *num_planes; i++) {
-			sizes[i] = inst_format.plane_fmt[i].sizeimage;
-			dev_dbg(inst->dev->dev, "%s: size[%u]: %u\n", __func__, i, sizes[i]);
+		if (*num_planes == 1) {
+			if (inst->output_format == FORMAT_422)
+				sizes[0] = inst_format.width * inst_format.height * 2;
+			else
+				sizes[0] = inst_format.width * inst_format.height * 3 / 2;
+			dev_dbg(inst->dev->dev, "%s: size[0]: %u\n", __func__, sizes[0]);
+		} else if (*num_planes == 2) {
+			sizes[0] = inst_format.width * inst_format.height;
+			if (inst->output_format == FORMAT_422)
+				sizes[1] = inst_format.width * inst_format.height;
+			else
+				sizes[1] = inst_format.width * inst_format.height / 2;
+			dev_dbg(inst->dev->dev, "%s: size[0]: %u | size[1]: %u\n",
+				__func__, sizes[0], sizes[1]);
+		} else if (*num_planes == 3) {
+			sizes[0] = inst_format.width * inst_format.height;
+			if (inst->output_format == FORMAT_422) {
+				sizes[1] = inst_format.width * inst_format.height / 2;
+				sizes[2] = inst_format.width * inst_format.height / 2;
+			} else {
+				sizes[1] = inst_format.width * inst_format.height / 4;
+				sizes[2] = inst_format.width * inst_format.height / 4;
+			}
+			dev_dbg(inst->dev->dev, "%s: size[0]: %u | size[1]: %u | size[2]: %u\n",
+				__func__, sizes[0], sizes[1], sizes[2]);
 		}
 	}
 
@@ -1192,6 +1276,7 @@ static int fill_ringbuffer(struct vpu_instance *inst)
 	struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
 	struct v4l2_m2m_buffer *buf, *n;
 	int ret;
+	bool feeded = FALSE;
 
 	if (m2m_ctx->last_src_buf)  {
 		struct vpu_src_buffer *vpu_buf = wave5_to_vpu_src_buf(m2m_ctx->last_src_buf);
@@ -1264,9 +1349,15 @@ static int fill_ringbuffer(struct vpu_instance *inst)
 			dev_dbg(inst->dev->dev, "last src buffer written to the ring bufferur\n");
 			break;
 		}
+
+		feeded = true;
+		break;
 	}
 
-	return 0;
+	if (feeded)
+		return 0;
+	else	
+		return 1;
 }
 
 static void wave5_vpu_dec_buf_queue_src(struct vb2_buffer *vb)
@@ -1392,6 +1483,7 @@ static int wave5_vpu_dec_start_streaming(struct vb2_queue *q, unsigned int count
 			goto free_bitstream_vbuf;
 		}
 
+		INIT_LIST_HEAD(&inst->ts_list);
 		ret = switch_state(inst, VPU_INST_STATE_OPEN);
 		if (ret)
 			goto free_bitstream_vbuf;
@@ -1430,6 +1522,14 @@ static int streamoff_output(struct vb2_queue *q)
 	struct vb2_v4l2_buffer *buf;
 	int ret;
 	dma_addr_t new_rd_ptr;
+	struct vpu_timestamp_list *ts;
+	struct vpu_timestamp_list *tmp;
+
+	inst->retry = FALSE;
+	list_for_each_entry_safe(ts, tmp, &inst->ts_list, list) {
+		list_del_init(&inst->ts_list);
+		kfree(ts);
+	}
 
 	while ((buf = v4l2_m2m_src_buf_remove(m2m_ctx))) {
 		dev_dbg(inst->dev->dev, "%s: (Multiplanar) buf type %4u | index %4u\n",
@@ -1612,13 +1712,21 @@ static void wave5_vpu_dec_device_run(void *priv)
 	struct queue_status_info q_status;
 	u32 fail_res = 0;
 	int ret = 0;
+	unsigned long flags;
 
 	dev_dbg(inst->dev->dev, "%s: Fill the ring buffer with new bitstream data", __func__);
-
-	ret = fill_ringbuffer(inst);
-	if (ret) {
-		dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
-		goto finish_job_and_return;
+	if (inst->retry == FALSE ) {
+		mutex_lock(&inst->feed_lock);
+		ret = fill_ringbuffer(inst);
+		mutex_unlock(&inst->feed_lock);
+		if (ret < 0) {
+			dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
+			goto finish_job_and_return;
+		}
+               else if(ret == 1 && !inst->eos) {
+                       dev_dbg(inst->dev->dev, "%s: there is no bitstream for feeding, so skip ", __func__);
+                       goto finish_job_and_return;
+               }
 	}
 
 	switch (inst->state) {
@@ -1654,8 +1762,9 @@ static void wave5_vpu_dec_device_run(void *priv)
 		 * we had a chance to switch, which leads to an invalid state
 		 * change.
 		 */
+		spin_lock_irqsave(&inst->state_spinlock, flags);
 		switch_state(inst, VPU_INST_STATE_PIC_RUN);
-
+		spin_unlock_irqrestore(&inst->state_spinlock, flags);
 		/*
 		 * During DRC, the picture decoding remains pending, so just leave the job
 		 * active until this decode operation completes.
@@ -1669,12 +1778,14 @@ static void wave5_vpu_dec_device_run(void *priv)
 		ret = wave5_prepare_fb(inst);
 		if (ret) {
 			dev_warn(inst->dev->dev, "Framebuffer preparation, fail: %d\n", ret);
+			spin_lock_irqsave(&inst->state_spinlock, flags);
 			switch_state(inst, VPU_INST_STATE_STOP);
+			spin_unlock_irqrestore(&inst->state_spinlock, flags);
 			break;
 		}
 
 		if (q_status.instance_queue_count) {
-			dev_dbg(inst->dev->dev, "%s: leave with active job", __func__);
+			v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 			return;
 		}
 
@@ -1685,13 +1796,15 @@ static void wave5_vpu_dec_device_run(void *priv)
 			dev_err(inst->dev->dev,
 				"Frame decoding on m2m context (%p), fail: %d (result: %d)\n",
 				m2m_ctx, ret, fail_res);
-			break;
+			goto finish_job_and_return;
 		}
-		/* Return so that we leave this job active */
-		dev_dbg(inst->dev->dev, "%s: leave with active job", __func__);
+		if (fail_res == WAVE5_SYSERR_QUEUEING_FAIL)
+			inst->retry = TRUE;
+		else
+			inst->retry = FALSE;
+
 		return;
 	default:
-		WARN(1, "Execution of a job in state %s illegal.\n", state_to_str(inst->state));
 		break;
 	}
 
@@ -1797,6 +1910,7 @@ static int wave5_vpu_open_dec(struct file *filp)
 	filp->private_data = &inst->v4l2_fh;
 	v4l2_fh_add(&inst->v4l2_fh);
 
+	mutex_init(&inst->feed_lock);
 	INIT_LIST_HEAD(&inst->list);
 	list_add_tail(&inst->list, &dev->instances);
 

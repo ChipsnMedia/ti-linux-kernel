@@ -196,6 +196,8 @@ int wave5_vpu_dec_close(struct vpu_instance *inst, u32 *fail_res)
 	int retry = 0;
 	struct vpu_device *vpu_dev = inst->dev;
 	int i;
+	struct vpu_timestamp_list *ts;
+	struct vpu_timestamp_list *tmp;
 
 	*fail_res = 0;
 	if (!inst->codec_info)
@@ -233,6 +235,11 @@ int wave5_vpu_dec_close(struct vpu_instance *inst, u32 *fail_res)
 
 	wave5_vdi_free_dma_memory(vpu_dev, &p_dec_info->vb_task);
 
+	list_for_each_entry_safe(ts, tmp, &inst->ts_list, list) {
+		list_del_init(&inst->ts_list);
+		vfree(ts);
+	}
+		
 	if (!pm_runtime_suspended(inst->dev->dev))
 		pm_runtime_put_sync(inst->dev->dev);
 

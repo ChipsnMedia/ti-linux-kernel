@@ -767,6 +767,11 @@ struct vpu_instance_ops {
 	void (*finish_process)(struct vpu_instance *inst);
 };
 
+struct vpu_timestamp_list {
+	struct list_head list;
+	u64 timestamp;
+};
+
 struct vpu_instance {
 	struct list_head list;
 	struct v4l2_fh v4l2_fh;
@@ -802,10 +807,13 @@ struct vpu_instance {
 	struct list_head avail_dst_bufs;
 	struct v4l2_rect conf_win;
 	u64 timestamp;
+	struct list_head ts_list;
 	enum frame_buffer_format output_format;
 	bool cbcr_interleave;
 	bool nv21;
 	bool eos;
+	bool retry;
+	struct mutex feed_lock;
 	struct vpu_buf bitstream_vbuf;
 	dma_addr_t last_rd_ptr;
 	size_t remaining_consumed_bytes;
