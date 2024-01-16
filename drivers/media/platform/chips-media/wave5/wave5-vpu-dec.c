@@ -1276,7 +1276,6 @@ static int fill_ringbuffer(struct vpu_instance *inst)
 	struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
 	struct v4l2_m2m_buffer *buf, *n;
 	int ret;
-	bool feeded = FALSE;
 
 	if (m2m_ctx->last_src_buf)  {
 		struct vpu_src_buffer *vpu_buf = wave5_to_vpu_src_buf(m2m_ctx->last_src_buf);
@@ -1350,14 +1349,9 @@ static int fill_ringbuffer(struct vpu_instance *inst)
 			break;
 		}
 
-		feeded = true;
-		break;
 	}
 
-	if (feeded)
-		return 0;
-	else	
-		return 1;
+	return 0;
 }
 
 static void wave5_vpu_dec_buf_queue_src(struct vb2_buffer *vb)
@@ -1723,10 +1717,6 @@ static void wave5_vpu_dec_device_run(void *priv)
 			dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
 			goto finish_job_and_return;
 		}
-               else if(ret == 1 && !inst->eos) {
-                       dev_dbg(inst->dev->dev, "%s: there is no bitstream for feeding, so skip ", __func__);
-                       goto finish_job_and_return;
-               }
 	}
 
 	switch (inst->state) {
