@@ -121,6 +121,8 @@ static const struct vpu_format dec_fmt_list[FMT_TYPES][MAX_FMTS] = {
 	}
 };
 
+static int fill_ringbuffer(struct vpu_instance *inst);
+
 /*
  * Make sure that the state switch is allowed and add logging for debugging
  * purposes
@@ -324,9 +326,7 @@ static int start_decode(struct vpu_instance *inst, u32 *fail_res)
 		switch_state(inst, VPU_INST_STATE_STOP);
 
 		dev_err(inst->dev->dev, "%s: pic run failed / finish job", __func__);
-	//	v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 	}
-	v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 	return ret;
 }
 
@@ -422,7 +422,6 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 	struct vb2_v4l2_buffer *dec_buf = NULL;
 	struct vb2_v4l2_buffer *disp_buf = NULL;
 	struct vb2_queue *dst_vq = v4l2_m2m_get_dst_vq(m2m_ctx);
-	struct queue_status_info q_status;
 
 	dev_dbg(inst->dev->dev, "%s: Fetch output info from firmware.", __func__);
 
@@ -455,12 +454,12 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		struct vb2_buffer *vb = vb2_get_buffer(dst_vq,
 						       dec_info.index_frame_decoded);
 		if (vb) {
+			struct vpu_timestamp_list *ts;
 			dec_buf = to_vb2_v4l2_buffer(vb);
 			dec_buf->vb2_buf.timestamp = inst->timestamp;
-			struct vpu_timestamp_list *ts =   list_first_entry(&inst->ts_list, struct vpu_timestamp_list, list);
+			ts =   list_first_entry(&inst->ts_list, struct vpu_timestamp_list, list);
 			if (ts) {
 				list_del_init(&inst->ts_list);
-				//printk("ts : %lld 	%lld\n",ts->timestamp,inst->timestamp);
 				dec_buf->vb2_buf.timestamp = ts->timestamp;
 				kfree(ts);
 			}
@@ -525,20 +524,6 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		}
 		spin_unlock_irqrestore(&inst->state_spinlock, flags);
 	}
-
-	/*
-	 * During a resolution change and while draining, the firmware may flush
-	 * the reorder queue regardless of having a matching decoding operation
-	 * pending. Only terminate the job if there are no more IRQ coming.
-	 */
-#if 0	
-	wave5_vpu_dec_give_command(inst, DEC_GET_QUEUE_STATUS, &q_status);
-	if (q_status.report_queue_count == 0 &&
-	    (q_status.instance_queue_count == 0 || dec_info.sequence_changed)) {
-		dev_dbg(inst->dev->dev, "%s: finishing job.\n", __func__);
-		v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
-	}
-#endif	
 }
 
 static int wave5_vpu_dec_querycap(struct file *file, void *fh, struct v4l2_capability *cap)
@@ -858,22 +843,17 @@ static int wave5_vpu_dec_s_selection(struct file *file, void *fh, struct v4l2_se
 	return 0;
 }
 
-
-static int fill_ringbuffer(struct vpu_instance *inst);
-
 static void wave5_vpu_dec_feed_remaining(struct vpu_instance *inst)
 {
        int ret = 0;
        struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
        u32 fail_res = 0;
-       printk("wave5_vpu_dec_feed_remaining 1 \n");
-#if 1
+
        ret = fill_ringbuffer(inst);
        if (ret) {
                dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
                return;
        }
-       printk("wave5_vpu_dec_feed_remaining 2 \n");
 
        ret = start_decode(inst, &fail_res);
        if (ret) {
@@ -881,9 +861,7 @@ static void wave5_vpu_dec_feed_remaining(struct vpu_instance *inst)
                        "Frame decoding on m2m context (%p), fail: %d (result: %d)\n",
                        m2m_ctx, ret, fail_res);
        }
-#endif
-       /* Return so that we leave this job active */
-       printk("wave5_vpu_dec_feed_remaining 3\n");
+       v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 }
 
 
@@ -915,7 +893,6 @@ static int wave5_vpu_dec_stop(struct vpu_instance *inst)
                	if (vbuf) {
                        vpu_buf = wave5_to_vpu_src_buf(vbuf);
                        if (vpu_buf->consumed == false) {
-                               printk("the last buffer is not consumed yet 1111\n");
                                mutex_lock(&inst->feed_lock);
                                wave5_vpu_dec_feed_remaining(inst);
                                mutex_unlock(&inst->feed_lock);
@@ -1728,7 +1705,7 @@ static void wave5_vpu_dec_device_run(void *priv)
                else if(ret == 1 && !inst->eos && inst->queuing_num == 0) {
                        dev_dbg(inst->dev->dev, "%s: there is no bitstream for feeding, so skip ", __func__);
                        goto finish_job_and_return;
-               }
+                }
 	}
 
 	switch (inst->state) {
@@ -1793,6 +1770,7 @@ static void wave5_vpu_dec_device_run(void *priv)
 
 		fallthrough;
 	case VPU_INST_STATE_PIC_RUN:
+
 		ret = start_decode(inst, &fail_res);
 		if (ret) {
 			dev_err(inst->dev->dev,
@@ -1804,10 +1782,12 @@ static void wave5_vpu_dec_device_run(void *priv)
 			inst->retry = TRUE;
 		else {
 			inst->retry = FALSE;
-			inst->queuing_num--;
-		}
+			if (!inst->eos) {
+				inst->queuing_num--;
 
-		return;
+			}
+		}
+		break;
 	default:
 		break;
 	}
