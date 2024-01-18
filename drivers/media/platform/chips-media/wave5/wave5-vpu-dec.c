@@ -517,8 +517,10 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 
 			if (dec_info.sequence_changed)
 				handle_dynamic_resolution_change(inst);
-			else
+			else {
 				send_eos_event(inst);
+				dev_dbg(inst->dev->dev,"%s: sent eos event",__func__);
+			}
 
 			flag_last_buffer_done(inst);
 		}
@@ -1701,8 +1703,9 @@ static void wave5_vpu_dec_device_run(void *priv)
 		if (ret < 0) {
 			dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
 			goto finish_job_and_return;
-		}
-               else if(ret == 1 && !inst->eos && inst->queuing_num == 0) {
+		} else if (ret == 1 && !inst->eos &&
+			inst->queuing_num == 0 &&
+			inst->state == VPU_INST_STATE_PIC_RUN) {
                        dev_dbg(inst->dev->dev, "%s: there is no bitstream for feeding, so skip ", __func__);
                        goto finish_job_and_return;
                 }
