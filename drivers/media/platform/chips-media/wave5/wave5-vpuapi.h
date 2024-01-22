@@ -814,7 +814,7 @@ struct vpu_instance {
 	bool eos;
 	bool retry;
 	int queuing_num;
-	struct mutex feed_lock;
+	spinlock_t feed_lock;
 	struct vpu_buf bitstream_vbuf;
 	dma_addr_t last_rd_ptr;
 	size_t remaining_consumed_bytes;

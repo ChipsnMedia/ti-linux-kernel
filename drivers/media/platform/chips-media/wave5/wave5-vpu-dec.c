@@ -422,6 +422,7 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 	struct vb2_v4l2_buffer *dec_buf = NULL;
 	struct vb2_v4l2_buffer *disp_buf = NULL;
 	struct vb2_queue *dst_vq = v4l2_m2m_get_dst_vq(m2m_ctx);
+	unsigned int flags;
 
 	dev_dbg(inst->dev->dev, "%s: Fetch output info from firmware.", __func__);
 
@@ -434,19 +435,19 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 
 	dev_dbg(inst->dev->dev, "%s: rd_ptr %pad wr_ptr %pad", __func__, &dec_info.rd_ptr,
 		&dec_info.wr_ptr);
-	mutex_lock(&inst->feed_lock);
+	spin_lock_irqsave(&inst->feed_lock, flags);
 	if (dec_info.index_frame_decoded == DECODED_IDX_FLAG_SKIP &&
 		dec_info.index_frame_display == DISPLAY_IDX_FLAG_NO_FB) {
 		struct vb2_v4l2_buffer *src_buf = v4l2_m2m_src_buf_remove(m2m_ctx);
 		if (src_buf)
 			v4l2_m2m_buf_done(src_buf, VB2_BUF_STATE_ERROR);
-		mutex_unlock(&inst->feed_lock);
+		spin_unlock_irqrestore(&inst->feed_lock, flags);
 		return;
 	}
 	else {
 		wave5_handle_src_buffer(inst, dec_info.rd_ptr);
 	}
-	mutex_unlock(&inst->feed_lock);
+	spin_unlock_irqrestore(&inst->feed_lock, flags);
 
 	dev_dbg(inst->dev->dev, "%s: dec_info dec_idx %i disp_idx %i", __func__,
 		dec_info.index_frame_decoded, dec_info.index_frame_display);
@@ -905,9 +906,9 @@ static int wave5_vpu_dec_stop(struct vpu_instance *inst)
                	if (vbuf) {
                        vpu_buf = wave5_to_vpu_src_buf(vbuf);
                        if (vpu_buf->consumed == false) {
-                               mutex_lock(&inst->feed_lock);
+                               spin_lock_irqsave(&inst->feed_lock, flags);
                                wave5_vpu_dec_feed_remaining(inst);
-                               mutex_unlock(&inst->feed_lock);
+                               spin_unlock_irqrestore(&inst->feed_lock, flags);
                        }
                	}
 
@@ -1707,9 +1708,9 @@ static void wave5_vpu_dec_device_run(void *priv)
 
 	dev_dbg(inst->dev->dev, "%s: Fill the ring buffer with new bitstream data", __func__);
 	if (inst->retry == FALSE ) {
-		mutex_lock(&inst->feed_lock);
+		spin_lock_irqsave(&inst->feed_lock, flags);
 		ret = fill_ringbuffer(inst);
-		mutex_unlock(&inst->feed_lock);
+		spin_unlock_irqrestore(&inst->feed_lock, flags);
 		if (ret < 0) {
 			dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
 			goto finish_job_and_return;
@@ -1907,7 +1908,7 @@ static int wave5_vpu_open_dec(struct file *filp)
 	filp->private_data = &inst->v4l2_fh;
 	v4l2_fh_add(&inst->v4l2_fh);
 
-	mutex_init(&inst->feed_lock);
+	spin_lock_init(&inst->feed_lock);
 	INIT_LIST_HEAD(&inst->list);
 	list_add_tail(&inst->list, &dev->instances);
 
