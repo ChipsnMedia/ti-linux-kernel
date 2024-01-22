@@ -435,7 +435,17 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 	dev_dbg(inst->dev->dev, "%s: rd_ptr %pad wr_ptr %pad", __func__, &dec_info.rd_ptr,
 		&dec_info.wr_ptr);
 	mutex_lock(&inst->feed_lock);
-	wave5_handle_src_buffer(inst, dec_info.rd_ptr);
+	if (dec_info.index_frame_decoded == DECODED_IDX_FLAG_SKIP &&
+		dec_info.index_frame_display == DISPLAY_IDX_FLAG_NO_FB) {
+		struct vb2_v4l2_buffer *src_buf = v4l2_m2m_src_buf_remove(m2m_ctx);
+		if (src_buf)
+			v4l2_m2m_buf_done(src_buf, VB2_BUF_STATE_ERROR);
+		mutex_unlock(&inst->feed_lock);
+		return;
+	}
+	else {
+		wave5_handle_src_buffer(inst, dec_info.rd_ptr);
+	}
 	mutex_unlock(&inst->feed_lock);
 
 	dev_dbg(inst->dev->dev, "%s: dec_info dec_idx %i disp_idx %i", __func__,
