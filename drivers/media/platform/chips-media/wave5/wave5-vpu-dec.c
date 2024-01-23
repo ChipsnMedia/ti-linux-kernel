@@ -256,54 +256,54 @@ static void wave5_update_pix_fmt(struct v4l2_pix_format_mplane *pix_mp, unsigned
 	case V4L2_PIX_FMT_NV21:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
-		pix_mp->plane_fmt[0].sizeimage = width * height * 3 / 2;
+		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
+		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height * 3 / 2;;
 		break;
 	case V4L2_PIX_FMT_YUV422P:
 	case V4L2_PIX_FMT_NV16:
 	case V4L2_PIX_FMT_NV61:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
-		pix_mp->plane_fmt[0].sizeimage = width * height * 2;
+		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
+		pix_mp->plane_fmt[0].sizeimage = pix_mp->width  * pix_mp->height * 2;
 		break;
 	case V4L2_PIX_FMT_YUV420M:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
-		pix_mp->plane_fmt[0].sizeimage = width * height;
-		pix_mp->plane_fmt[1].bytesperline = round_up(width, 32) / 2;
-		pix_mp->plane_fmt[1].sizeimage = width * height / 4;
-		pix_mp->plane_fmt[2].bytesperline = round_up(width, 32) / 2;
-		pix_mp->plane_fmt[2].sizeimage = width * height / 4;
+		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
+		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height;
+		pix_mp->plane_fmt[1].bytesperline = pix_mp->width / 2;
+		pix_mp->plane_fmt[1].sizeimage = pix_mp->width * pix_mp->height / 4;
+		pix_mp->plane_fmt[2].bytesperline = pix_mp->width / 2;
+		pix_mp->plane_fmt[2].sizeimage = pix_mp->width * pix_mp->height / 4;
 		break;
 	case V4L2_PIX_FMT_NV12M:
 	case V4L2_PIX_FMT_NV21M:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
-		pix_mp->plane_fmt[0].sizeimage = width * height;
-		pix_mp->plane_fmt[1].bytesperline = round_up(width, 32);
-		pix_mp->plane_fmt[1].sizeimage = width * height / 2;
+		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
+		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height;
+		pix_mp->plane_fmt[1].bytesperline = pix_mp->width;
+		pix_mp->plane_fmt[1].sizeimage = pix_mp->width * pix_mp->height / 2;
 		break;
 	case V4L2_PIX_FMT_YUV422M:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
-		pix_mp->plane_fmt[0].sizeimage = width * height;
-		pix_mp->plane_fmt[1].bytesperline = round_up(width, 32) / 2;
-		pix_mp->plane_fmt[1].sizeimage = width * height / 2;
-		pix_mp->plane_fmt[2].bytesperline = round_up(width, 32) / 2;
-		pix_mp->plane_fmt[2].sizeimage = width * height / 2;
+		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
+		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height;
+		pix_mp->plane_fmt[1].bytesperline = pix_mp->width / 2;
+		pix_mp->plane_fmt[1].sizeimage = pix_mp->width * pix_mp->height / 2;
+		pix_mp->plane_fmt[2].bytesperline = pix_mp->width / 2;
+		pix_mp->plane_fmt[2].sizeimage = pix_mp->width * pix_mp->height / 2;
 		break;
 	case V4L2_PIX_FMT_NV16M:
 	case V4L2_PIX_FMT_NV61M:
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
-		pix_mp->plane_fmt[0].bytesperline = round_up(width, 32);
-		pix_mp->plane_fmt[0].sizeimage = width * height;
-		pix_mp->plane_fmt[1].bytesperline = round_up(width, 32);
-		pix_mp->plane_fmt[1].sizeimage = width * height;
+		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
+		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height;
+		pix_mp->plane_fmt[1].bytesperline = pix_mp->width;
+		pix_mp->plane_fmt[1].sizeimage = pix_mp->width * pix_mp->height;
 		break;
 	default:
 		pix_mp->width = width;
