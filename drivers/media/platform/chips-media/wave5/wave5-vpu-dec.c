@@ -212,8 +212,10 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 		struct vb2_v4l2_buffer *src_buf = &buf->vb;
 		size_t src_size = vb2_get_plane_payload(&src_buf->vb2_buf, 0);
 
-		if (src_size > consumed_bytes)
+		if (src_size > consumed_bytes) {
+			//printk("src_size:%d consumed_bytes:%zu \n",src_size, consumed_bytes);
 			break;
+		}
 
 		dev_dbg(inst->dev->dev, "%s: removing src buffer %i",
 			__func__, src_buf->vb2_buf.index);
@@ -222,6 +224,7 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 		ts = kzalloc(sizeof(*ts), GFP_KERNEL);
 		INIT_LIST_HEAD(&ts->list);
 		ts->timestamp = inst->timestamp;
+		//printk("=== input ts:%lld \n",ts->timestamp);
 		list_add_tail(&inst->ts_list, &ts->list);
 
 		v4l2_m2m_buf_done(src_buf, VB2_BUF_STATE_DONE);
@@ -232,6 +235,7 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 			int ret;
 
 			m2m_ctx->last_src_buf = NULL;
+			//printk("sent eos 1\n");
 			ret = wave5_vpu_dec_set_eos_on_firmware(inst);
 			if (ret)
 				dev_warn(inst->dev->dev,
@@ -414,6 +418,8 @@ static int handle_dynamic_resolution_change(struct vpu_instance *inst)
 	return 0;
 }
 
+int g_disp_count = 0;
+
 static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 {
 	struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
@@ -422,7 +428,7 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 	struct vb2_v4l2_buffer *dec_buf = NULL;
 	struct vb2_v4l2_buffer *disp_buf = NULL;
 	struct vb2_queue *dst_vq = v4l2_m2m_get_dst_vq(m2m_ctx);
-	unsigned int flags;
+	unsigned long flags;
 
 	dev_dbg(inst->dev->dev, "%s: Fetch output info from firmware.", __func__);
 
@@ -435,7 +441,12 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 
 	dev_dbg(inst->dev->dev, "%s: rd_ptr %pad wr_ptr %pad", __func__, &dec_info.rd_ptr,
 		&dec_info.wr_ptr);
+
+	dev_dbg(inst->dev->dev, "%s: dec_info dec_idx %i disp_idx %i", __func__,
+		dec_info.index_frame_decoded, dec_info.index_frame_display);
+
 	spin_lock_irqsave(&inst->feed_lock, flags);
+#if 0	
 	if (dec_info.index_frame_decoded == DECODED_IDX_FLAG_SKIP &&
 		dec_info.index_frame_display == DISPLAY_IDX_FLAG_NO_FB) {
 		struct vb2_v4l2_buffer *src_buf = v4l2_m2m_src_buf_remove(m2m_ctx);
@@ -445,8 +456,11 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		return;
 	}
 	else {
-		wave5_handle_src_buffer(inst, dec_info.rd_ptr);
+		wave5_handle_src_buffer(inst, dec_info.rd_ptr);  
 	}
+#else
+	wave5_handle_src_buffer(inst, dec_info.rd_ptr); 
+#endif
 	spin_unlock_irqrestore(&inst->feed_lock, flags);
 
 	dev_dbg(inst->dev->dev, "%s: dec_info dec_idx %i disp_idx %i", __func__,
@@ -467,11 +481,12 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		if (vb) {
 			struct vpu_timestamp_list *ts;
 			dec_buf = to_vb2_v4l2_buffer(vb);
-			dec_buf->vb2_buf.timestamp = inst->timestamp;
+			//dec_buf->vb2_buf.timestamp = inst->timestamp;
 			ts =   list_first_entry(&inst->ts_list, struct vpu_timestamp_list, list);
 			if (ts) {
 				list_del_init(&inst->ts_list);
 				dec_buf->vb2_buf.timestamp = ts->timestamp;
+				//printk("ts: %lld \n",dec_buf->vb2_buf.timestamp);
 				kfree(ts);
 			}
 		} else {
@@ -511,8 +526,8 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		/* TODO implement interlace support */
 		disp_buf->field = V4L2_FIELD_NONE;
 		dst_vpu_buf->display = true;
+		//printk("disp seq:%d count:%d ts:%lld\n",disp_buf->sequence, g_disp_count++, disp_buf->vb2_buf.timestamp);
 		v4l2_m2m_buf_done(disp_buf, VB2_BUF_STATE_DONE);
-
 		dev_dbg(inst->dev->dev, "%s: frame_cycle %8u (payload %lu)\n",
 			__func__, dec_info.frame_cycle,
 			vb2_get_plane_payload(&disp_buf->vb2_buf, 0));
@@ -911,7 +926,8 @@ static int wave5_vpu_dec_stop(struct vpu_instance *inst)
                                spin_unlock_irqrestore(&inst->feed_lock, flags);
                        }
                	}
-
+		
+		//printk("wave5_vpu_dec_stop sent eos\n");
 		ret = wave5_vpu_dec_set_eos_on_firmware(inst);
 		if (ret)
 			return ret;
@@ -1360,7 +1376,7 @@ static void wave5_vpu_dec_buf_queue_src(struct vb2_buffer *vb)
 
 	vpu_buf->consumed = false;
 	vbuf->sequence = inst->queued_src_buf_num++;
-
+	//printk("src seq:%d\n",vbuf->sequence);
 	v4l2_m2m_buf_queue(m2m_ctx, vbuf);
 }
 
@@ -1682,7 +1698,7 @@ static int initialize_sequence(struct vpu_instance *inst)
 			__func__, ret, initial_info.seq_init_err_reason);
 		wave5_handle_src_buffer(inst, initial_info.rd_ptr);
 		return ret;
-	}
+	} 
 
 	handle_dynamic_resolution_change(inst);
 
