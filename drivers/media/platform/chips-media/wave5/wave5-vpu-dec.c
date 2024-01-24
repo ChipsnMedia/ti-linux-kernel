@@ -442,8 +442,8 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		dec_info.index_frame_decoded, dec_info.index_frame_display);
 
 	spin_lock_irqsave(&inst->feed_lock, flags);
-#if 0	
-	if (dec_info.index_frame_decoded == DECODED_IDX_FLAG_SKIP &&
+	if (inst->std == W_AVC_DEC &&
+		dec_info.index_frame_decoded == DECODED_IDX_FLAG_SKIP &&
 		dec_info.index_frame_display == DISPLAY_IDX_FLAG_NO_FB) {
 		struct vb2_v4l2_buffer *src_buf = v4l2_m2m_src_buf_remove(m2m_ctx);
 		if (src_buf)
@@ -454,9 +454,6 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 	else {
 		wave5_handle_src_buffer(inst, dec_info.rd_ptr);  
 	}
-#else
-	wave5_handle_src_buffer(inst, dec_info.rd_ptr); 
-#endif
 	spin_unlock_irqrestore(&inst->feed_lock, flags);
 
 	dev_dbg(inst->dev->dev, "%s: dec_info dec_idx %i disp_idx %i", __func__,
