@@ -213,7 +213,6 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 		size_t src_size = vb2_get_plane_payload(&src_buf->vb2_buf, 0);
 
 		if (src_size > consumed_bytes) {
-			//printk("src_size:%d consumed_bytes:%zu \n",src_size, consumed_bytes);
 			break;
 		}
 
@@ -224,7 +223,6 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 		ts = kzalloc(sizeof(*ts), GFP_KERNEL);
 		INIT_LIST_HEAD(&ts->list);
 		ts->timestamp = inst->timestamp;
-		//printk("=== input ts:%lld \n",ts->timestamp);
 		list_add_tail(&inst->ts_list, &ts->list);
 
 		v4l2_m2m_buf_done(src_buf, VB2_BUF_STATE_DONE);
@@ -235,7 +233,6 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 			int ret;
 
 			m2m_ctx->last_src_buf = NULL;
-			//printk("sent eos 1\n");
 			ret = wave5_vpu_dec_set_eos_on_firmware(inst);
 			if (ret)
 				dev_warn(inst->dev->dev,
@@ -418,7 +415,6 @@ static int handle_dynamic_resolution_change(struct vpu_instance *inst)
 	return 0;
 }
 
-int g_disp_count = 0;
 
 static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 {
@@ -481,12 +477,10 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		if (vb) {
 			struct vpu_timestamp_list *ts;
 			dec_buf = to_vb2_v4l2_buffer(vb);
-			//dec_buf->vb2_buf.timestamp = inst->timestamp;
 			ts =   list_first_entry(&inst->ts_list, struct vpu_timestamp_list, list);
 			if (ts) {
 				list_del_init(&inst->ts_list);
 				dec_buf->vb2_buf.timestamp = ts->timestamp;
-				//printk("ts: %lld \n",dec_buf->vb2_buf.timestamp);
 				kfree(ts);
 			}
 		} else {
@@ -526,7 +520,6 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		/* TODO implement interlace support */
 		disp_buf->field = V4L2_FIELD_NONE;
 		dst_vpu_buf->display = true;
-		//printk("disp seq:%d count:%d ts:%lld\n",disp_buf->sequence, g_disp_count++, disp_buf->vb2_buf.timestamp);
 		v4l2_m2m_buf_done(disp_buf, VB2_BUF_STATE_DONE);
 		dev_dbg(inst->dev->dev, "%s: frame_cycle %8u (payload %lu)\n",
 			__func__, dec_info.frame_cycle,
@@ -927,7 +920,6 @@ static int wave5_vpu_dec_stop(struct vpu_instance *inst)
                        }
                	}
 		
-		//printk("wave5_vpu_dec_stop sent eos\n");
 		ret = wave5_vpu_dec_set_eos_on_firmware(inst);
 		if (ret)
 			return ret;
@@ -1376,7 +1368,6 @@ static void wave5_vpu_dec_buf_queue_src(struct vb2_buffer *vb)
 
 	vpu_buf->consumed = false;
 	vbuf->sequence = inst->queued_src_buf_num++;
-	//printk("src seq:%d\n",vbuf->sequence);
 	v4l2_m2m_buf_queue(m2m_ctx, vbuf);
 }
 
