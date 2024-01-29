@@ -123,6 +123,28 @@ static const struct vpu_format dec_fmt_list[FMT_TYPES][MAX_FMTS] = {
 
 static int fill_ringbuffer(struct vpu_instance *inst);
 
+static int run_thread(void *data)
+{
+	struct vpu_instance *inst = (struct vpu_instance *) data;
+	struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
+
+	printk("run_thread is started \n");
+	while (!kthread_should_stop()) {
+	
+		if (down_interruptible(&inst->run_sem)) {
+			printk("error sem wait \n");
+			continue;
+		}
+
+		if (kthread_should_stop())
+			break;
+
+		v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
+	}
+	printk(" the run_thread is terminated \n");
+	return 0;
+}
+
 /*
  * Make sure that the state switch is allowed and add logging for debugging
  * purposes
@@ -220,7 +242,8 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 			__func__, src_buf->vb2_buf.index);
 		src_buf = v4l2_m2m_src_buf_remove(m2m_ctx);
 		inst->timestamp = src_buf->vb2_buf.timestamp;
-		ts = kzalloc(sizeof(*ts), GFP_KERNEL);
+		ts = vmalloc(sizeof(*ts));
+		memset(ts, 0x00, sizeof(*ts));
 		INIT_LIST_HEAD(&ts->list);
 		ts->timestamp = inst->timestamp;
 		list_add_tail(&inst->ts_list, &ts->list);
@@ -476,9 +499,9 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 			dec_buf = to_vb2_v4l2_buffer(vb);
 			ts =   list_first_entry(&inst->ts_list, struct vpu_timestamp_list, list);
 			if (ts) {
-				list_del_init(&inst->ts_list);
+				list_del(&ts->list);
 				dec_buf->vb2_buf.timestamp = ts->timestamp;
-				kfree(ts);
+				vfree(ts);
 			}
 		} else {
 			dev_warn(inst->dev->dev, "%s: invalid decoded frame index %i",
@@ -1523,8 +1546,8 @@ static int streamoff_output(struct vb2_queue *q)
 	inst->retry = FALSE;
 	inst->queuing_num = 0;
 	list_for_each_entry_safe(ts, tmp, &inst->ts_list, list) {
-		list_del_init(&inst->ts_list);
-		kfree(ts);
+		list_del(&ts->list);
+		vfree(ts);
 	}
 
 	while ((buf = v4l2_m2m_src_buf_remove(m2m_ctx))) {
@@ -1812,7 +1835,9 @@ static void wave5_vpu_dec_device_run(void *priv)
 
 finish_job_and_return:
 	dev_dbg(inst->dev->dev, "%s: leave and finish job", __func__);
-	v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
+	up(&inst->run_sem);
+
+	//v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 }
 
 static void wave5_vpu_dec_job_abort(void *priv)
@@ -1970,6 +1995,8 @@ static int wave5_vpu_open_dec(struct file *filp)
 	}
 
 	wave5_vdi_allocate_sram(inst->dev);
+	sema_init(&inst->run_sem, 1);
+	inst->run_thread = kthread_run(run_thread, inst, "run thread");
 
 	return 0;
 

@@ -819,7 +819,8 @@ struct vpu_instance {
 	dma_addr_t last_rd_ptr;
 	size_t remaining_consumed_bytes;
 	bool needs_reallocation;
-
+	struct semaphore run_sem;
+	struct task_struct *run_thread;
 	unsigned int min_src_buf_count;
 	unsigned int rot_angle;
 	unsigned int mirror_direction;

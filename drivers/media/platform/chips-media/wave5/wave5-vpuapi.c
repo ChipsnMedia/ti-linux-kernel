@@ -236,7 +236,7 @@ int wave5_vpu_dec_close(struct vpu_instance *inst, u32 *fail_res)
 	wave5_vdi_free_dma_memory(vpu_dev, &p_dec_info->vb_task);
 
 	list_for_each_entry_safe(ts, tmp, &inst->ts_list, list) {
-		list_del_init(&inst->ts_list);
+		list_del(&ts->list);
 		vfree(ts);
 	}
 		
