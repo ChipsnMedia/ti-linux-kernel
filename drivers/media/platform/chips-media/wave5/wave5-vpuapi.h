@@ -807,7 +807,6 @@ struct vpu_instance {
 	struct list_head avail_dst_bufs;
 	struct v4l2_rect conf_win;
 	u64 timestamp;
-	struct list_head ts_list;
 	enum frame_buffer_format output_format;
 	bool cbcr_interleave;
 	bool nv21;

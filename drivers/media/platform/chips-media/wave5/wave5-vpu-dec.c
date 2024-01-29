@@ -128,20 +128,18 @@ static int run_thread(void *data)
 	struct vpu_instance *inst = (struct vpu_instance *) data;
 	struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
 
-	printk("run_thread is started \n");
 	while (!kthread_should_stop()) {
-	
-		if (down_interruptible(&inst->run_sem)) {
-			printk("error sem wait \n");
+
+		if (down_interruptible(&inst->run_sem))
 			continue;
-		}
+
 
 		if (kthread_should_stop())
 			break;
 
 		v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 	}
-	printk(" the run_thread is terminated \n");
+
 	return 0;
 }
 
@@ -230,7 +228,6 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 		consumed_bytes);
 
 	v4l2_m2m_for_each_src_buf_safe(m2m_ctx, buf, n) {
-		struct vpu_timestamp_list *ts;
 		struct vb2_v4l2_buffer *src_buf = &buf->vb;
 		size_t src_size = vb2_get_plane_payload(&src_buf->vb2_buf, 0);
 
@@ -242,12 +239,6 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 			__func__, src_buf->vb2_buf.index);
 		src_buf = v4l2_m2m_src_buf_remove(m2m_ctx);
 		inst->timestamp = src_buf->vb2_buf.timestamp;
-		ts = vmalloc(sizeof(*ts));
-		memset(ts, 0x00, sizeof(*ts));
-		INIT_LIST_HEAD(&ts->list);
-		ts->timestamp = inst->timestamp;
-		list_add_tail(&inst->ts_list, &ts->list);
-
 		v4l2_m2m_buf_done(src_buf, VB2_BUF_STATE_DONE);
 		consumed_bytes -= src_size;
 
@@ -495,14 +486,8 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		struct vb2_buffer *vb = vb2_get_buffer(dst_vq,
 						       dec_info.index_frame_decoded);
 		if (vb) {
-			struct vpu_timestamp_list *ts;
 			dec_buf = to_vb2_v4l2_buffer(vb);
-			ts =   list_first_entry(&inst->ts_list, struct vpu_timestamp_list, list);
-			if (ts) {
-				list_del(&ts->list);
-				dec_buf->vb2_buf.timestamp = ts->timestamp;
-				vfree(ts);
-			}
+			dec_buf->vb2_buf.timestamp = inst->timestamp;
 		} else {
 			dev_warn(inst->dev->dev, "%s: invalid decoded frame index %i",
 				 __func__, dec_info.index_frame_decoded);
@@ -1501,7 +1486,6 @@ static int wave5_vpu_dec_start_streaming(struct vb2_queue *q, unsigned int count
 			goto free_bitstream_vbuf;
 		}
 
-		INIT_LIST_HEAD(&inst->ts_list);
 		ret = switch_state(inst, VPU_INST_STATE_OPEN);
 		if (ret)
 			goto free_bitstream_vbuf;
@@ -1540,15 +1524,9 @@ static int streamoff_output(struct vb2_queue *q)
 	struct vb2_v4l2_buffer *buf;
 	int ret;
 	dma_addr_t new_rd_ptr;
-	struct vpu_timestamp_list *ts;
-	struct vpu_timestamp_list *tmp;
 
 	inst->retry = FALSE;
 	inst->queuing_num = 0;
-	list_for_each_entry_safe(ts, tmp, &inst->ts_list, list) {
-		list_del(&ts->list);
-		vfree(ts);
-	}
 
 	while ((buf = v4l2_m2m_src_buf_remove(m2m_ctx))) {
 		dev_dbg(inst->dev->dev, "%s: (Multiplanar) buf type %4u | index %4u\n",
@@ -1938,7 +1916,6 @@ static int wave5_vpu_open_dec(struct file *filp)
 	v4l2_fh_add(&inst->v4l2_fh);
 
 	spin_lock_init(&inst->feed_lock);
-	INIT_LIST_HEAD(&inst->list);
 	list_add_tail(&inst->list, &dev->instances);
 
 	inst->v4l2_m2m_dev = inst->dev->v4l2_m2m_dec_dev;
