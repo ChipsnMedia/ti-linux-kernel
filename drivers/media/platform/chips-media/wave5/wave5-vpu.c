@@ -52,12 +52,11 @@ static irqreturn_t wave5_vpu_irq_thread(int irq, void *dev_id)
 	if (wave5_vdi_read_register(dev, W5_VPU_VPU_INT_STS)) {
 		irq_reason = wave5_vdi_read_register(dev, W5_VPU_VINT_REASON);
 		wave5_vdi_write_register(dev, W5_VPU_VINT_REASON_CLR, irq_reason);
+		seq_done = wave5_vdi_read_register(dev, W5_RET_SEQ_DONE_INSTANCE_INFO);
+		cmd_done = wave5_vdi_read_register(dev, W5_RET_QUEUE_CMD_DONE_INST);
 		wave5_vdi_write_register(dev, W5_VPU_VINT_CLEAR, 0x1);
 
 		list_for_each_entry(inst, &dev->instances, list) {
-			seq_done = wave5_vdi_read_register(dev, W5_RET_SEQ_DONE_INSTANCE_INFO);
-			cmd_done = wave5_vdi_read_register(dev, W5_RET_QUEUE_CMD_DONE_INST);
-
 			if (irq_reason & BIT(INT_WAVE5_INIT_SEQ) ||
 			    irq_reason & BIT(INT_WAVE5_ENC_SET_PARAM)) {
 				if (seq_done & BIT(inst->id)) {
@@ -80,6 +79,7 @@ static irqreturn_t wave5_vpu_irq_thread(int irq, void *dev_id)
 
 			wave5_vpu_clear_interrupt(inst, irq_reason);
 		}
+
 	}
 
 	return IRQ_HANDLED;

@@ -767,6 +767,11 @@ struct vpu_instance_ops {
 	void (*finish_process)(struct vpu_instance *inst);
 };
 
+struct vpu_timestamp_list {
+	struct list_head list;
+	u64 timestamp;
+};
+
 struct vpu_instance {
 	struct list_head list;
 	struct v4l2_fh v4l2_fh;
@@ -806,11 +811,15 @@ struct vpu_instance {
 	bool cbcr_interleave;
 	bool nv21;
 	bool eos;
+	bool retry;
+	int queuing_num;
+	spinlock_t feed_lock;
 	struct vpu_buf bitstream_vbuf;
 	dma_addr_t last_rd_ptr;
 	size_t remaining_consumed_bytes;
 	bool needs_reallocation;
-
+	struct semaphore run_sem;
+	struct task_struct *run_thread;
 	unsigned int min_src_buf_count;
 	unsigned int rot_angle;
 	unsigned int mirror_direction;
