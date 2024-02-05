@@ -52,6 +52,7 @@ int wave5_vpu_release_device(struct file *filp,
 			     char *name)
 {
 	struct vpu_instance *inst = wave5_to_vpu_inst(filp->private_data);
+
 	if (inst->run_thread) {
 		up(&inst->run_sem);
 		kthread_stop(inst->run_thread);

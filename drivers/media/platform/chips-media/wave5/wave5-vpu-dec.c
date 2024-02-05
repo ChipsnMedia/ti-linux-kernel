@@ -231,9 +231,8 @@ static void wave5_handle_src_buffer(struct vpu_instance *inst, dma_addr_t rd_ptr
 		struct vb2_v4l2_buffer *src_buf = &buf->vb;
 		size_t src_size = vb2_get_plane_payload(&src_buf->vb2_buf, 0);
 
-		if (src_size > consumed_bytes) {
+		if (src_size > consumed_bytes)
 			break;
-		}
 
 		dev_dbg(inst->dev->dev, "%s: removing src buffer %i",
 			__func__, src_buf->vb2_buf.index);
@@ -268,7 +267,7 @@ static void wave5_update_pix_fmt(struct v4l2_pix_format_mplane *pix_mp, unsigned
 		pix_mp->width = round_up(width, 32);
 		pix_mp->height = round_up(height, 16);
 		pix_mp->plane_fmt[0].bytesperline = pix_mp->width;
-		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height * 3 / 2;;
+		pix_mp->plane_fmt[0].sizeimage = pix_mp->width * pix_mp->height * 3 / 2;
 		break;
 	case V4L2_PIX_FMT_YUV422P:
 	case V4L2_PIX_FMT_NV16:
@@ -460,13 +459,13 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 		dec_info.index_frame_decoded == DECODED_IDX_FLAG_SKIP &&
 		dec_info.index_frame_display == DISPLAY_IDX_FLAG_NO_FB) {
 		struct vb2_v4l2_buffer *src_buf = v4l2_m2m_src_buf_remove(m2m_ctx);
+
 		if (src_buf)
 			v4l2_m2m_buf_done(src_buf, VB2_BUF_STATE_ERROR);
 		spin_unlock_irqrestore(&inst->feed_lock, flags);
 		return;
-	}
-	else {
-		wave5_handle_src_buffer(inst, dec_info.rd_ptr);  
+	} else {
+		wave5_handle_src_buffer(inst, dec_info.rd_ptr);
 	}
 	spin_unlock_irqrestore(&inst->feed_lock, flags);
 
@@ -543,7 +542,7 @@ static void wave5_vpu_dec_finish_decode(struct vpu_instance *inst)
 				handle_dynamic_resolution_change(inst);
 			else {
 				send_eos_event(inst);
-				dev_dbg(inst->dev->dev,"%s: sent eos event",__func__);
+				dev_dbg(inst->dev->dev, "%s: sent eos event", __func__);
 			}
 
 			flag_last_buffer_done(inst);
@@ -871,23 +870,23 @@ static int wave5_vpu_dec_s_selection(struct file *file, void *fh, struct v4l2_se
 
 static void wave5_vpu_dec_feed_remaining(struct vpu_instance *inst)
 {
-       int ret = 0;
-       struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
-       u32 fail_res = 0;
+	int ret = 0;
+	struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
+	u32 fail_res = 0;
 
-       ret = fill_ringbuffer(inst);
-       if (ret) {
-               dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
-               return;
-       }
+	ret = fill_ringbuffer(inst);
+	if (ret) {
+		dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
+		return;
+	}
 
-       ret = start_decode(inst, &fail_res);
-       if (ret) {
-               dev_err(inst->dev->dev,
-                       "Frame decoding on m2m context (%p), fail: %d (result: %d)\n",
-                       m2m_ctx, ret, fail_res);
-       }
-       v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
+	ret = start_decode(inst, &fail_res);
+	if (ret) {
+		dev_err(inst->dev->dev,
+			"Frame decoding on m2m context (%p), fail: %d (result: %d)\n",
+			m2m_ctx, ret, fail_res);
+	}
+	v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 }
 
 
@@ -906,8 +905,8 @@ static int wave5_vpu_dec_stop(struct vpu_instance *inst)
 	}
 
 	if (inst->state != VPU_INST_STATE_NONE) {
-               struct vb2_v4l2_buffer *vbuf;
-               struct vpu_src_buffer *vpu_buf;
+		struct vb2_v4l2_buffer *vbuf;
+		struct vpu_src_buffer *vpu_buf;
 
 		/*
 		 * Temporarily release the state_spinlock so that subsequent
@@ -915,16 +914,16 @@ static int wave5_vpu_dec_stop(struct vpu_instance *inst)
 		 */
 		spin_unlock_irqrestore(&inst->state_spinlock, flags);
 
-               	vbuf = v4l2_m2m_last_src_buf(m2m_ctx);
-               	if (vbuf) {
-                       vpu_buf = wave5_to_vpu_src_buf(vbuf);
-                       if (vpu_buf->consumed == false) {
-                               spin_lock_irqsave(&inst->feed_lock, flags);
-                               wave5_vpu_dec_feed_remaining(inst);
-                               spin_unlock_irqrestore(&inst->feed_lock, flags);
-                       }
-               	}
-		
+		vbuf = v4l2_m2m_last_src_buf(m2m_ctx);
+		if (vbuf) {
+			vpu_buf = wave5_to_vpu_src_buf(vbuf);
+			if (vpu_buf->consumed == false) {
+				spin_lock_irqsave(&inst->feed_lock, flags);
+				wave5_vpu_dec_feed_remaining(inst);
+				spin_unlock_irqrestore(&inst->feed_lock, flags);
+			}
+		}
+
 		ret = wave5_vpu_dec_set_eos_on_firmware(inst);
 		if (ret)
 			return ret;
@@ -1360,7 +1359,7 @@ static int fill_ringbuffer(struct vpu_instance *inst)
 
 	if (feeded)
 		return 0;
-	else	
+	else
 		return 1;
 }
 
@@ -1687,7 +1686,7 @@ static int initialize_sequence(struct vpu_instance *inst)
 			__func__, ret, initial_info.seq_init_err_reason);
 		wave5_handle_src_buffer(inst, initial_info.rd_ptr);
 		return ret;
-	} 
+	}
 
 	handle_dynamic_resolution_change(inst);
 
@@ -1712,7 +1711,7 @@ static void wave5_vpu_dec_device_run(void *priv)
 	unsigned long flags;
 
 	dev_dbg(inst->dev->dev, "%s: Fill the ring buffer with new bitstream data", __func__);
-	if (inst->retry == FALSE ) {
+	if (inst->retry == FALSE) {
 		spin_lock_irqsave(&inst->feed_lock, flags);
 		ret = fill_ringbuffer(inst);
 		spin_unlock_irqrestore(&inst->feed_lock, flags);
@@ -1722,9 +1721,9 @@ static void wave5_vpu_dec_device_run(void *priv)
 		} else if (ret == 1 && !inst->eos &&
 			inst->queuing_num == 0 &&
 			inst->state == VPU_INST_STATE_PIC_RUN) {
-                       dev_dbg(inst->dev->dev, "%s: there is no bitstream for feeding, so skip ", __func__);
-                       goto finish_job_and_return;
-                }
+			dev_dbg(inst->dev->dev, "%s: there is no bitstream for feeding, so skip ", __func__);
+			goto finish_job_and_return;
+		}
 	}
 
 	switch (inst->state) {
@@ -1801,10 +1800,8 @@ static void wave5_vpu_dec_device_run(void *priv)
 			inst->retry = TRUE;
 		else {
 			inst->retry = FALSE;
-			if (!inst->eos) {
+			if (!inst->eos)
 				inst->queuing_num--;
-
-			}
 		}
 		break;
 	default:
