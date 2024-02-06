@@ -238,6 +238,7 @@ int wave5_vpu_dec_close(struct vpu_instance *inst, u32 *fail_res)
 
 unlock_and_return:
 	mutex_unlock(&vpu_dev->hw_lock);
+	mutex_destroy(&inst->feed_lock);
 
 	return ret;
 }
