@@ -6,6 +6,7 @@
  */
 
 #include <linux/pm_runtime.h>
+#include <linux/delay.h>
 #include "wave5-helper.h"
 
 #define VPU_ENC_DEV_NAME "C&M Wave5 VPU encoder"
@@ -14,6 +15,8 @@
 #define DEFAULT_SRC_SIZE(width, height) ({			\
 	(width) * (height) / 8 * 3;					\
 })
+
+#define GET_ENC_BSBUF_FULL_WRPTR 0x01
 
 static const struct vpu_format enc_fmt_list[FMT_TYPES][MAX_FMTS] = {
 	[VPU_FMT_TYPE_CODEC] = {
@@ -311,6 +314,107 @@ static int start_encode(struct vpu_instance *inst, u32 *fail_res)
 	return 0;
 }
 
+static void wave5_vpu_enc_handling_linebuf(struct vpu_instance *inst)
+{
+	struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
+	int ptr_sel = GET_ENC_BSBUF_FULL_WRPTR;
+	int ret;
+	int size;
+	dma_addr_t rd,wr;
+	struct enc_output_info enc_output_info;
+	struct vb2_v4l2_buffer *src_buf = NULL;
+	struct vb2_v4l2_buffer *dst_buf = NULL;
+
+	wave5_vpu_enc_give_command(inst, ENC_WRPTR_SEL, &ptr_sel);
+	ret = wave5_vpu_enc_get_ptr_info(inst, &rd, &wr, &size);
+	if (ret) {
+		dev_err(inst->dev->dev,
+			"%s: wave5_vpu_enc_get_ptr_info fail: %d\n",
+			__func__, ret);
+		return;
+	}
+	dev_err(inst->dev->dev, "%s: rd:%llx wr:%llx, size:%d \n",__func__,rd, wr, size);
+	wave5_vpu_enc_update_bs(inst, &size);
+	mdelay(10);
+	ret = wave5_vpu_enc_get_output_info(inst, &enc_output_info);
+	if (ret) {
+		dev_err(inst->dev->dev,
+			"%s: vpu_enc_get_output_info fail: %d  reason: %u | info: %u\n",
+			__func__, ret, enc_output_info.error_reason, enc_output_info.warn_info);
+		return;
+	}
+
+	dev_err(inst->dev->dev,
+		"%s: pic_type %i recon_idx %i src_idx %i pic_byte %u pts %llu\n",
+		__func__,  enc_output_info.pic_type, enc_output_info.recon_frame_index,
+		enc_output_info.enc_src_idx, enc_output_info.enc_pic_byte, enc_output_info.pts);
+
+
+	if (enc_output_info.enc_src_idx >= 0) {
+		struct vb2_buffer *vb = vb2_get_buffer(v4l2_m2m_get_src_vq(m2m_ctx),
+						       enc_output_info.enc_src_idx);
+		if (vb->state != VB2_BUF_STATE_ACTIVE)
+			dev_warn(inst->dev->dev,
+				 "%s: encoded buffer (%d) was not in ready queue %i.",
+				 __func__, enc_output_info.enc_src_idx, vb->state);
+		else
+			src_buf = to_vb2_v4l2_buffer(vb);
+
+		if (src_buf) {
+			inst->timestamp = src_buf->vb2_buf.timestamp;
+			v4l2_m2m_buf_done(src_buf, VB2_BUF_STATE_DONE);
+		} else {
+			dev_warn(inst->dev->dev, "%s: no source buffer with index: %d found\n",
+				 __func__, enc_output_info.enc_src_idx);
+		}
+	}
+
+	dst_buf = v4l2_m2m_dst_buf_remove(m2m_ctx);
+	if (enc_output_info.recon_frame_index == RECON_IDX_FLAG_ENC_END) {
+		static const struct v4l2_event vpu_event_eos = {
+			.type = V4L2_EVENT_EOS
+		};
+
+		if (!WARN_ON(!dst_buf)) {
+			vb2_set_plane_payload(&dst_buf->vb2_buf, 0, 0);
+			dst_buf->field = V4L2_FIELD_NONE;
+			v4l2_m2m_last_buffer_done(m2m_ctx, dst_buf);
+		}
+
+		v4l2_event_queue_fh(&inst->v4l2_fh, &vpu_event_eos);
+
+	} else {
+		if (!dst_buf) {
+			dev_warn(inst->dev->dev, "No bitstream buffer.");
+			v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
+			return;
+		}
+		vb2_set_plane_payload(&dst_buf->vb2_buf, 0, size);
+
+		dst_buf->vb2_buf.timestamp = inst->timestamp;
+		dst_buf->field = V4L2_FIELD_NONE;
+		if (enc_output_info.pic_type == PIC_TYPE_I) {
+			if (enc_output_info.enc_vcl_nut == 19 ||
+			    enc_output_info.enc_vcl_nut == 20)
+				dst_buf->flags |= V4L2_BUF_FLAG_KEYFRAME;
+			else
+				dst_buf->flags |= V4L2_BUF_FLAG_PFRAME;
+		} else if (enc_output_info.pic_type == PIC_TYPE_P) {
+			dst_buf->flags |= V4L2_BUF_FLAG_PFRAME;
+		} else if (enc_output_info.pic_type == PIC_TYPE_B) {
+			dst_buf->flags |= V4L2_BUF_FLAG_BFRAME;
+		}
+
+		v4l2_m2m_buf_done(dst_buf, VB2_BUF_STATE_DONE);
+	}
+
+	v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
+
+	vb2_queue_error(v4l2_m2m_get_src_vq(inst->v4l2_fh.m2m_ctx));
+        vb2_queue_error(v4l2_m2m_get_dst_vq(inst->v4l2_fh.m2m_ctx));
+	dev_dbg(inst->dev->dev, "%s: handing linebuf interrupt has done\n",__func__);
+}
+
 static void wave5_vpu_enc_finish_encode(struct vpu_instance *inst)
 {
 	struct v4l2_m2m_ctx *m2m_ctx = inst->v4l2_fh.m2m_ctx;
@@ -377,7 +481,6 @@ static void wave5_vpu_enc_finish_encode(struct vpu_instance *inst)
 			v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 			return;
 		}
-
 		vb2_set_plane_payload(&dst_buf->vb2_buf, 0, enc_output_info.bitstream_size);
 
 		dst_buf->vb2_buf.timestamp = inst->timestamp;
@@ -1565,6 +1668,7 @@ static int wave5_vpu_enc_queue_init(void *priv, struct vb2_queue *src_vq, struct
 
 static const struct vpu_instance_ops wave5_vpu_enc_inst_ops = {
 	.finish_process = wave5_vpu_enc_finish_encode,
+	.linebuf_process = wave5_vpu_enc_handling_linebuf,
 };
 
 static void wave5_vpu_enc_device_run(void *priv)

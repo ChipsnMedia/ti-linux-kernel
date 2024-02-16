@@ -1387,6 +1387,19 @@ int wave5_dec_set_rd_ptr(struct vpu_instance *inst, dma_addr_t addr)
 /* ENCODER functions */
 /************************************************************************/
 
+int wave5_vpu_enc_set_bitstream_ptr(struct vpu_instance *inst, int *size)
+{
+	u32 reg_val;
+	struct enc_info *p_enc_info = &inst->codec_info->enc_info;
+
+	vpu_write_reg(inst->dev, W5_CMD_ENC_BS_START_ADDR, p_enc_info->stream_rd_ptr);
+	vpu_write_reg(inst->dev, W5_CMD_ENC_BS_SIZE, *size);
+	reg_val = (p_enc_info->line_buf_int_en << 6) | BITSTREAM_ENDIANNESS_BIG_ENDIAN;
+	vpu_write_reg(inst->dev, W5_CMD_BS_PARAM, reg_val);
+
+	return send_firmware_command(inst, W5_UPDATE_BS, true, NULL, NULL);
+}
+
 int wave5_vpu_build_up_enc_param(struct device *dev, struct vpu_instance *inst,
 				 struct enc_open_param *open_param)
 {
@@ -2141,6 +2154,22 @@ int wave5_vpu_encode(struct vpu_instance *inst, struct enc_param *option, u32 *f
 		return ret;
 
 	return 0;
+}
+
+int wave5_vpu_enc_get_rdwr_ptr(struct vpu_instance *inst)
+{
+	int ret;
+	struct enc_info *p_enc_info = &inst->codec_info->enc_info;
+
+	vpu_write_reg(inst->dev, W5_CMD_ENC_REASON_SEL, p_enc_info->wr_ptr_sel);
+	ret = wave5_send_query(inst->dev, inst, GET_BS_WR_PTR);
+	if (ret)
+		return ret;
+
+	p_enc_info->stream_wr_ptr = wave5_read_reg_for_mem_addr(inst, W5_RET_ENC_WR_PTR);
+	p_enc_info->stream_rd_ptr = wave5_read_reg_for_mem_addr(inst, W5_RET_ENC_RD_PTR);
+
+	return ret;
 }
 
 int wave5_vpu_enc_get_result(struct vpu_instance *inst, struct enc_output_info *result)

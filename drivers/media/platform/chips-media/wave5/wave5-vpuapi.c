@@ -668,6 +668,22 @@ int wave5_vpu_dec_give_command(struct vpu_instance *inst, enum codec_command cmd
 	return ret;
 }
 
+int wave5_vpu_enc_update_bs(struct vpu_instance *inst, int *size)
+{
+	int ret;
+	struct vpu_device *vpu_dev = inst->dev;
+
+	ret = mutex_lock_interruptible(&vpu_dev->hw_lock);
+	if (ret)
+		goto unlock_mutex;
+
+	ret = wave5_vpu_enc_set_bitstream_ptr(inst, size);
+
+unlock_mutex:
+	mutex_unlock(&vpu_dev->hw_lock);
+	return ret;
+}
+
 int wave5_vpu_enc_open(struct vpu_instance *inst, struct enc_open_param *open_param)
 {
 	struct enc_info *p_enc_info;
@@ -853,6 +869,30 @@ int wave5_vpu_enc_start_one_frame(struct vpu_instance *inst, struct enc_param *p
 	return ret;
 }
 
+int wave5_vpu_enc_get_ptr_info(struct vpu_instance *inst, dma_addr_t *rd, dma_addr_t *wr, int *size)
+{
+	int ret;
+	struct vpu_device *vpu_dev = inst->dev;
+	struct enc_info *p_enc_info;
+
+	ret = mutex_lock_interruptible(&vpu_dev->hw_lock);
+	if (ret)
+		return ret;
+
+	ret = wave5_vpu_enc_get_rdwr_ptr(inst);
+	if (ret)
+		goto unlock;
+
+	p_enc_info = &inst->codec_info->enc_info;
+	*size = p_enc_info->stream_wr_ptr -  p_enc_info->stream_rd_ptr;
+	*wr = p_enc_info->stream_wr_ptr;
+	*rd = p_enc_info->stream_rd_ptr;
+
+unlock:
+	mutex_unlock(&vpu_dev->hw_lock);
+	return ret;
+}
+
 int wave5_vpu_enc_get_output_info(struct vpu_instance *inst, struct enc_output_info *info)
 {
 	struct enc_info *p_enc_info = &inst->codec_info->enc_info;
@@ -915,6 +955,10 @@ int wave5_vpu_enc_give_command(struct vpu_instance *inst, enum codec_command cmd
 
 		queue_info->instance_queue_count = p_enc_info->instance_queue_count;
 		queue_info->report_queue_count = p_enc_info->report_queue_count;
+		break;
+	}
+	case ENC_WRPTR_SEL: {
+		p_enc_info->wr_ptr_sel = *(int *)parameter;
 		break;
 	}
 	default:

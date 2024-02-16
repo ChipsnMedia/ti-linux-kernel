@@ -208,6 +208,7 @@ enum codec_command {
 	ENC_GET_QUEUE_STATUS,
 	DEC_RESET_FRAMEBUF_INFO,
 	DEC_GET_SEQ_INFO,
+	ENC_WRPTR_SEL,
 };
 
 enum mirror_direction {
@@ -733,6 +734,7 @@ struct enc_info {
 	u32 product_code;
 	u32 vlc_buf_size;
 	u32 param_buf_size;
+	u32 wr_ptr_sel;
 };
 
 struct vpu_device {
@@ -765,7 +767,10 @@ struct vpu_instance;
 
 struct vpu_instance_ops {
 	void (*finish_process)(struct vpu_instance *inst);
+	void (*linebuf_process)(struct vpu_instance *inst);
 };
+
+
 
 struct vpu_timestamp_list {
 	struct list_head list;
@@ -877,5 +882,7 @@ int wave5_vpu_enc_start_one_frame(struct vpu_instance *inst, struct enc_param *p
 				  u32 *fail_res);
 int wave5_vpu_enc_get_output_info(struct vpu_instance *inst, struct enc_output_info *info);
 int wave5_vpu_enc_give_command(struct vpu_instance *inst, enum codec_command cmd, void *parameter);
+int wave5_vpu_enc_get_ptr_info(struct vpu_instance *inst, dma_addr_t *rd, dma_addr_t *wr, int *size);
+int wave5_vpu_enc_update_bs(struct vpu_instance *inst, int *size);
 
 #endif

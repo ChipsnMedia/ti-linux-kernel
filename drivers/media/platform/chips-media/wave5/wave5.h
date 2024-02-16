@@ -114,4 +114,8 @@ int wave5_vpu_enc_finish_seq(struct vpu_instance *inst, u32 *fail_res);
 
 int wave5_vpu_enc_check_open_param(struct vpu_instance *inst, struct enc_open_param *open_param);
 
+int wave5_vpu_enc_set_bitstream_ptr(struct vpu_instance *inst, int *size);
+
+int wave5_vpu_enc_get_rdwr_ptr(struct vpu_instance *inst);
+
 #endif /* __WAVE5_FUNCTION_H__ */
