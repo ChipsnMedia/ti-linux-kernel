@@ -5,6 +5,7 @@
  * Copyright (C) 2021-2023 CHIPS&MEDIA INC
  */
 
+#include <linux/pm_runtime.h>
 #include "wave5-helper.h"
 
 #define VPU_DEC_DEV_NAME "C&M Wave5 VPU decoder"
@@ -1389,7 +1390,6 @@ static int wave5_vpu_dec_start_streaming(struct vb2_queue *q, unsigned int count
 		struct dec_open_param open_param;
 
 		memset(&open_param, 0, sizeof(struct dec_open_param));
-
 		ret = wave5_vpu_dec_allocate_ring_buffer(inst);
 		if (ret)
 			goto return_buffers;
@@ -1626,7 +1626,7 @@ static void wave5_vpu_dec_device_run(void *priv)
 	int ret = 0;
 
 	dev_dbg(inst->dev->dev, "%s: Fill the ring buffer with new bitstream data", __func__);
-
+	pm_runtime_resume_and_get(inst->dev->dev);
 	ret = fill_ringbuffer(inst);
 	if (ret) {
 		dev_warn(inst->dev->dev, "Filling ring buffer failed\n");
@@ -1701,6 +1701,8 @@ static void wave5_vpu_dec_device_run(void *priv)
 		}
 		/* Return so that we leave this job active */
 		dev_dbg(inst->dev->dev, "%s: leave with active job", __func__);
+		pm_runtime_mark_last_busy(inst->dev->dev);
+		pm_runtime_put_autosuspend(inst->dev->dev);
 		return;
 	default:
 		WARN(1, "Execution of a job in state %s illegal.\n", state_to_str(inst->state));
@@ -1709,6 +1711,8 @@ static void wave5_vpu_dec_device_run(void *priv)
 
 finish_job_and_return:
 	dev_dbg(inst->dev->dev, "%s: leave and finish job", __func__);
+	pm_runtime_mark_last_busy(inst->dev->dev);
+	pm_runtime_put_autosuspend(inst->dev->dev);
 	v4l2_m2m_job_finish(inst->v4l2_m2m_dev, m2m_ctx);
 }
 
@@ -1790,6 +1794,7 @@ static int wave5_vpu_open_dec(struct file *filp)
 	struct vpu_instance *inst = NULL;
 	struct v4l2_m2m_ctx *m2m_ctx;
 	int ret = 0;
+	int err;
 
 	inst = kzalloc(sizeof(*inst), GFP_KERNEL);
 	if (!inst)
@@ -1867,6 +1872,14 @@ static int wave5_vpu_open_dec(struct file *filp)
 
 	wave5_vdi_allocate_sram(inst->dev);
 
+	if (!pm_runtime_active(inst->dev->dev)) {
+		err = pm_runtime_resume_and_get(inst->dev->dev);
+		if (err) {
+			dev_err(inst->dev->dev, "decoder runtime resume failed %d\n", err);
+			ret = -EINVAL;
+			goto cleanup_inst;
+		}
+	}
 	return 0;
 
 cleanup_inst:
