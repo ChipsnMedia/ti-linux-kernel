@@ -1428,6 +1428,8 @@ static int wave5_vpu_dec_start_streaming(struct vb2_queue *q, unsigned int count
 			}
 		}
 	}
+	pm_runtime_mark_last_busy(inst->dev->dev);
+	pm_runtime_put_autosuspend(inst->dev->dev);
 	return ret;
 
 free_bitstream_vbuf:
@@ -1709,8 +1711,6 @@ static void wave5_vpu_dec_device_run(void *priv)
 		}
 		/* Return so that we leave this job active */
 		dev_dbg(inst->dev->dev, "%s: leave with active job", __func__);
-		pm_runtime_mark_last_busy(inst->dev->dev);
-		pm_runtime_put_autosuspend(inst->dev->dev);
 		return;
 	default:
 		WARN(1, "Execution of a job in state %s illegal.\n", state_to_str(inst->state));
@@ -1802,7 +1802,6 @@ static int wave5_vpu_open_dec(struct file *filp)
 	struct vpu_instance *inst = NULL;
 	struct v4l2_m2m_ctx *m2m_ctx;
 	int ret = 0;
-	int err;
 
 	inst = kzalloc(sizeof(*inst), GFP_KERNEL);
 	if (!inst)
@@ -1879,7 +1878,6 @@ static int wave5_vpu_open_dec(struct file *filp)
 	}
 
 	wave5_vdi_allocate_sram(inst->dev);
-
 	return 0;
 
 cleanup_inst:
