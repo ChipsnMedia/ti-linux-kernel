@@ -1004,6 +1004,8 @@ static int wave5_vpu_enc_s_ctrl(struct v4l2_ctrl *ctrl)
 		case V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE:
 			inst->enc_param.profile = H264_PROFILE_BP;
 			inst->bit_depth = 8;
+			if (ctrl->val == V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE)
+				inst->enc_param.constraint_set1_flag = 1;
 			break;
 		case V4L2_MPEG_VIDEO_H264_PROFILE_MAIN:
 			inst->enc_param.profile = H264_PROFILE_MP;
@@ -1277,7 +1279,9 @@ static void wave5_set_enc_openparam(struct enc_open_param *open_param,
 			open_param->wave_param.decoding_refresh_type = DEC_REFRESH_TYPE_IDR;
 			open_param->wave_param.intra_period = input.avc_idr_period;
 		}
-	} else {
+	} else if (inst->std == W_AVC_ENC)
+		open_param->wave_param.constraint_set1_flag = input.constraint_set1_flag;
+	else {
 		open_param->wave_param.avc_idr_period = input.avc_idr_period;
 	}
 	open_param->wave_param.entropy_coding_mode = input.entropy_coding_mode;
