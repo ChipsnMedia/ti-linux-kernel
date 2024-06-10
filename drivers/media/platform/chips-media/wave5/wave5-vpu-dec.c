@@ -312,26 +312,24 @@ static int handle_dynamic_resolution_change(struct vpu_instance *inst)
 			initial_info->pic_crop_rect.top - initial_info->pic_crop_rect.bottom;
 
 		vpu_fmt = wave5_find_vpu_fmt(inst->src_fmt.pixelformat,
-				dec_fmt_list[VPU_FMT_TYPE_CODEC]);
+					     dec_fmt_list[VPU_FMT_TYPE_CODEC]);
 		if (!vpu_fmt)
 			return -EINVAL;
 
-		wave5_update_pix_fmt(&inst->src_fmt,
-					VPU_FMT_TYPE_CODEC,
-					initial_info->pic_width,
-					initial_info->pic_height,
-					vpu_fmt->v4l2_frmsize);
+		wave5_update_pix_fmt(&inst->src_fmt, VPU_FMT_TYPE_CODEC,
+				     initial_info->pic_width,
+				     initial_info->pic_height,
+				     vpu_fmt->v4l2_frmsize);
 
 		vpu_fmt = wave5_find_vpu_fmt(inst->dst_fmt.pixelformat,
-				dec_fmt_list[VPU_FMT_TYPE_RAW]);
+					     dec_fmt_list[VPU_FMT_TYPE_RAW]);
 		if (!vpu_fmt)
 			return -EINVAL;
 
-		wave5_update_pix_fmt(&inst->dst_fmt,
-					VPU_FMT_TYPE_RAW,
-					initial_info->pic_width,
-					initial_info->pic_height,
-					vpu_fmt->v4l2_frmsize);
+		wave5_update_pix_fmt(&inst->dst_fmt, VPU_FMT_TYPE_RAW,
+				     initial_info->pic_width,
+				     initial_info->pic_height,
+				     vpu_fmt->v4l2_frmsize);
 	}
 
 	v4l2_event_queue_fh(fh, &vpu_event_src_ch);
@@ -473,16 +471,20 @@ static int wave5_vpu_dec_enum_framesizes(struct file *f, void *fh, struct v4l2_f
 		return -EINVAL;
 
 	vpu_fmt = wave5_find_vpu_fmt(fsize->pixel_format, dec_fmt_list[VPU_FMT_TYPE_CODEC]);
-	if (!vpu_fmt) {
-		vpu_fmt = wave5_find_vpu_fmt(fsize->pixel_format, dec_fmt_list[VPU_FMT_TYPE_RAW]);
-		if (!vpu_fmt)
-			return -EINVAL;
+	if (vpu_fmt) {
+		fsize->type = V4L2_FRMSIZE_TYPE_CONTINUOUS;
+		fsize->stepwise = *vpu_fmt->v4l2_frmsize;
+		return 0;
 	}
 
-	fsize->type = V4L2_FRMSIZE_TYPE_CONTINUOUS;
-	fsize->stepwise = *vpu_fmt->v4l2_frmsize;
+	vpu_fmt = wave5_find_vpu_fmt(fsize->pixel_format, dec_fmt_list[VPU_FMT_TYPE_RAW]);
+	if (vpu_fmt) {
+		fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+		fsize->stepwise = *vpu_fmt->v4l2_frmsize;
+		return 0;
+	}
 
-	return 0;
+	return -EINVAL;
 }
 
 static int wave5_vpu_dec_enum_fmt_cap(struct file *file, void *fh, struct v4l2_fmtdesc *f)
@@ -503,6 +505,7 @@ static int wave5_vpu_dec_try_fmt_cap(struct file *file, void *fh, struct v4l2_fo
 {
 	struct vpu_instance *inst = wave5_to_vpu_inst(fh);
 	struct dec_info *p_dec_info = &inst->codec_info->dec_info;
+	const struct v4l2_frmsize_stepwise *frmsize;
 	const struct vpu_format *vpu_fmt;
 	int width, height;
 
@@ -516,10 +519,12 @@ static int wave5_vpu_dec_try_fmt_cap(struct file *file, void *fh, struct v4l2_fo
 		width = inst->dst_fmt.width;
 		height = inst->dst_fmt.height;
 		f->fmt.pix_mp.pixelformat = inst->dst_fmt.pixelformat;
+		frmsize = &dec_raw_frmsize;
 	} else {
 		width = f->fmt.pix_mp.width;
 		height = f->fmt.pix_mp.height;
 		f->fmt.pix_mp.pixelformat = vpu_fmt->v4l2_pix_fmt;
+		frmsize = vpu_fmt->v4l2_frmsize;
 	}
 
 	if (p_dec_info->initial_info_obtained) {
@@ -528,9 +533,7 @@ static int wave5_vpu_dec_try_fmt_cap(struct file *file, void *fh, struct v4l2_fo
 	}
 
 	wave5_update_pix_fmt(&f->fmt.pix_mp, VPU_FMT_TYPE_RAW,
-					     width,
-					     height,
-					     vpu_fmt->v4l2_frmsize);
+			     width, height, frmsize);
 	f->fmt.pix_mp.colorspace = inst->colorspace;
 	f->fmt.pix_mp.ycbcr_enc = inst->ycbcr_enc;
 	f->fmt.pix_mp.quantization = inst->quantization;
@@ -642,6 +645,7 @@ static int wave5_vpu_dec_enum_fmt_out(struct file *file, void *fh, struct v4l2_f
 static int wave5_vpu_dec_try_fmt_out(struct file *file, void *fh, struct v4l2_format *f)
 {
 	struct vpu_instance *inst = wave5_to_vpu_inst(fh);
+	const struct v4l2_frmsize_stepwise *frmsize;
 	const struct vpu_format *vpu_fmt;
 	int width, height;
 
@@ -655,16 +659,16 @@ static int wave5_vpu_dec_try_fmt_out(struct file *file, void *fh, struct v4l2_fo
 		width = inst->src_fmt.width;
 		height = inst->src_fmt.height;
 		f->fmt.pix_mp.pixelformat = inst->src_fmt.pixelformat;
+		frmsize = &dec_hevc_frmsize;
 	} else {
 		width = f->fmt.pix_mp.width;
 		height = f->fmt.pix_mp.height;
 		f->fmt.pix_mp.pixelformat = vpu_fmt->v4l2_pix_fmt;
+		frmsize = vpu_fmt->v4l2_frmsize;
 	}
 
 	wave5_update_pix_fmt(&f->fmt.pix_mp, VPU_FMT_TYPE_CODEC,
-					     width,
-					     height,
-					     vpu_fmt->v4l2_frmsize);
+			     width, height, frmsize);
 
 	return 0;
 }
@@ -712,9 +716,8 @@ static int wave5_vpu_dec_s_fmt_out(struct file *file, void *fh, struct v4l2_form
 		return -EINVAL;
 
 	wave5_update_pix_fmt(&inst->dst_fmt, VPU_FMT_TYPE_RAW,
-					     f->fmt.pix_mp.width,
-					     f->fmt.pix_mp.height,
-					     vpu_fmt->v4l2_frmsize);
+			     f->fmt.pix_mp.width, f->fmt.pix_mp.height,
+			     vpu_fmt->v4l2_frmsize);
 
 	return 0;
 }
@@ -1477,15 +1480,13 @@ static void wave5_set_default_format(struct v4l2_pix_format_mplane *src_fmt,
 {
 	src_fmt->pixelformat = dec_fmt_list[VPU_FMT_TYPE_CODEC][0].v4l2_pix_fmt;
 	wave5_update_pix_fmt(src_fmt, VPU_FMT_TYPE_CODEC,
-				      W5_DEF_DEC_PIC_WIDTH,
-				      W5_DEF_DEC_PIC_HEIGHT,
-				      &dec_hevc_frmsize);
+			     W5_DEF_DEC_PIC_WIDTH, W5_DEF_DEC_PIC_HEIGHT,
+			     &dec_hevc_frmsize);
 
 	dst_fmt->pixelformat = dec_fmt_list[VPU_FMT_TYPE_RAW][0].v4l2_pix_fmt;
 	wave5_update_pix_fmt(dst_fmt, VPU_FMT_TYPE_RAW,
-				      W5_DEF_DEC_PIC_WIDTH,
-				      W5_DEF_DEC_PIC_HEIGHT,
-				      &dec_raw_frmsize);
+			     W5_DEF_DEC_PIC_WIDTH, W5_DEF_DEC_PIC_HEIGHT,
+			     &dec_raw_frmsize);
 }
 
 static int wave5_vpu_dec_queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)

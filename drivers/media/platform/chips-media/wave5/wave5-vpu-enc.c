@@ -68,21 +68,27 @@ static const struct vpu_format enc_fmt_list[FMT_TYPES][MAX_FMTS] = {
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_YUV422P,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_NV16,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_NV61,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_YUV422M,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_NV16M,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_NV61M,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 	}
 };
@@ -347,7 +353,7 @@ static int wave5_vpu_enc_enum_framesizes(struct file *f, void *fh, struct v4l2_f
 	}
 
 	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
-	fsize->stepwise = enc_frmsize[VPU_FMT_TYPE_CODEC];
+	fsize->stepwise = *vpu_fmt->v4l2_frmsize;
 
 	return 0;
 }
@@ -372,6 +378,7 @@ static int wave5_vpu_enc_enum_fmt_cap(struct file *file, void *fh, struct v4l2_f
 static int wave5_vpu_enc_try_fmt_cap(struct file *file, void *fh, struct v4l2_format *f)
 {
 	struct vpu_instance *inst = wave5_to_vpu_inst(fh);
+	const struct v4l2_frmsize_stepwise *frmsize;
 	const struct vpu_format *vpu_fmt;
 	int width, height;
 
@@ -384,16 +391,16 @@ static int wave5_vpu_enc_try_fmt_cap(struct file *file, void *fh, struct v4l2_fo
 		width = inst->dst_fmt.width;
 		height = inst->dst_fmt.height;
 		f->fmt.pix_mp.pixelformat = inst->dst_fmt.pixelformat;
+		frmsize = &enc_frmsize[VPU_FMT_TYPE_CODEC];
 	} else {
 		width = f->fmt.pix_mp.width;
 		height = f->fmt.pix_mp.height;
 		f->fmt.pix_mp.pixelformat = vpu_fmt->v4l2_pix_fmt;
+		frmsize = vpu_fmt->v4l2_frmsize;
 	}
 
 	wave5_update_pix_fmt(&f->fmt.pix_mp, VPU_FMT_TYPE_CODEC,
-					     width,
-					     height,
-					     vpu_fmt->v4l2_frmsize);
+			     width, height, frmsize);
 	f->fmt.pix_mp.colorspace = inst->colorspace;
 	f->fmt.pix_mp.ycbcr_enc = inst->ycbcr_enc;
 	f->fmt.pix_mp.quantization = inst->quantization;
@@ -480,6 +487,7 @@ static int wave5_vpu_enc_enum_fmt_out(struct file *file, void *fh, struct v4l2_f
 static int wave5_vpu_enc_try_fmt_out(struct file *file, void *fh, struct v4l2_format *f)
 {
 	struct vpu_instance *inst = wave5_to_vpu_inst(fh);
+	const struct v4l2_frmsize_stepwise *frmsize;
 	const struct vpu_format *vpu_fmt;
 	int width, height;
 
@@ -492,16 +500,16 @@ static int wave5_vpu_enc_try_fmt_out(struct file *file, void *fh, struct v4l2_fo
 		width = inst->src_fmt.width;
 		height = inst->src_fmt.height;
 		f->fmt.pix_mp.pixelformat = inst->src_fmt.pixelformat;
+		frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW];
 	} else {
 		width = f->fmt.pix_mp.width;
 		height = f->fmt.pix_mp.height;
 		f->fmt.pix_mp.pixelformat = vpu_fmt->v4l2_pix_fmt;
+		frmsize = vpu_fmt->v4l2_frmsize;
 	}
 
 	wave5_update_pix_fmt(&f->fmt.pix_mp, VPU_FMT_TYPE_RAW,
-					     width,
-					     height,
-					     vpu_fmt->v4l2_frmsize);
+			     width, height, frmsize);
 
 	return 0;
 }
@@ -559,9 +567,8 @@ static int wave5_vpu_enc_s_fmt_out(struct file *file, void *fh, struct v4l2_form
 		return -EINVAL;
 
 	wave5_update_pix_fmt(&inst->dst_fmt, VPU_FMT_TYPE_CODEC,
-					     f->fmt.pix_mp.width,
-					     f->fmt.pix_mp.height,
-					     vpu_fmt->v4l2_frmsize);
+			     f->fmt.pix_mp.width, f->fmt.pix_mp.height,
+			     vpu_fmt->v4l2_frmsize);
 	inst->conf_win.width = inst->dst_fmt.width;
 	inst->conf_win.height = inst->dst_fmt.height;
 
@@ -1132,7 +1139,7 @@ static void wave5_vpu_enc_buf_queue(struct vb2_buffer *vb)
 }
 
 static int wave5_set_enc_openparam(struct enc_open_param *open_param,
-				    struct vpu_instance *inst)
+				   struct vpu_instance *inst)
 {
 	struct enc_wave_param input = inst->enc_param;
 	const struct v4l2_format_info *info;
@@ -1477,15 +1484,13 @@ static void wave5_set_default_format(struct v4l2_pix_format_mplane *src_fmt,
 {
 	src_fmt->pixelformat = enc_fmt_list[VPU_FMT_TYPE_RAW][0].v4l2_pix_fmt;
 	wave5_update_pix_fmt(src_fmt, VPU_FMT_TYPE_RAW,
-				      W5_DEF_ENC_PIC_WIDTH,
-				      W5_DEF_ENC_PIC_HEIGHT,
-				      &enc_frmsize[VPU_FMT_TYPE_RAW]);
+			     W5_DEF_ENC_PIC_WIDTH, W5_DEF_ENC_PIC_HEIGHT,
+			     &enc_frmsize[VPU_FMT_TYPE_RAW]);
 
 	dst_fmt->pixelformat = enc_fmt_list[VPU_FMT_TYPE_CODEC][0].v4l2_pix_fmt;
 	wave5_update_pix_fmt(dst_fmt, VPU_FMT_TYPE_CODEC,
-				      W5_DEF_ENC_PIC_WIDTH,
-				      W5_DEF_ENC_PIC_HEIGHT,
-				      &enc_frmsize[VPU_FMT_TYPE_CODEC]);
+			     W5_DEF_ENC_PIC_WIDTH, W5_DEF_ENC_PIC_HEIGHT,
+			     &enc_frmsize[VPU_FMT_TYPE_CODEC]);
 }
 
 static int wave5_vpu_enc_queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
