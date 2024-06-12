@@ -103,7 +103,8 @@ static unsigned long wkup_m3_copy_aux_data(struct wkup_m3_ipc *m3_ipc,
 	aux_data_dev_addr = WKUP_M3_DMEM_START + WKUP_M3_AUXDATA_OFFSET;
 	aux_data_addr = rproc_da_to_va(m3_ipc->rproc,
 				       aux_data_dev_addr,
-				       WKUP_M3_AUXDATA_SIZE);
+				       WKUP_M3_AUXDATA_SIZE,
+				       NULL);
 	memcpy(aux_data_addr, data, sz);
 
 	return WKUP_M3_AUXDATA_OFFSET;
@@ -153,7 +154,7 @@ static int wkup_m3_init_scale_data(struct wkup_m3_ipc *m3_ipc,
 	if (!m3_ipc->sd_fw_name)
 		return ret;
 
-	ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
+	ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_UEVENT,
 				      m3_ipc->sd_fw_name, dev, GFP_ATOMIC,
 				      m3_ipc, wkup_m3_scale_data_fw_cb);
 
@@ -201,7 +202,7 @@ static int wkup_m3_ipc_dbg_init(struct wkup_m3_ipc *m3_ipc)
 {
 	m3_ipc->dbg_path = debugfs_create_dir("wkup_m3_ipc", NULL);
 
-	if (!m3_ipc->dbg_path)
+	if (IS_ERR(m3_ipc->dbg_path))
 		return -EINVAL;
 
 	(void)debugfs_create_file("enable_late_halt", 0644,
@@ -591,8 +592,9 @@ void wkup_m3_ipc_put(struct wkup_m3_ipc *m3_ipc)
 }
 EXPORT_SYMBOL_GPL(wkup_m3_ipc_put);
 
-static void wkup_m3_rproc_boot_thread(struct wkup_m3_ipc *m3_ipc)
+static int wkup_m3_rproc_boot_thread(void *arg)
 {
+	struct wkup_m3_ipc *m3_ipc = arg;
 	struct device *dev = m3_ipc->dev;
 	int ret;
 
@@ -604,7 +606,7 @@ static void wkup_m3_rproc_boot_thread(struct wkup_m3_ipc *m3_ipc)
 	else
 		m3_ipc_state = m3_ipc;
 
-	do_exit(0);
+	return 0;
 }
 
 static int wkup_m3_ipc_probe(struct platform_device *pdev)
@@ -613,7 +615,6 @@ static int wkup_m3_ipc_probe(struct platform_device *pdev)
 	int irq, ret, temp;
 	phandle rproc_phandle;
 	struct rproc *m3_rproc;
-	struct resource *res;
 	struct task_struct *task;
 	struct wkup_m3_ipc *m3_ipc;
 	struct device_node *np = dev->of_node;
@@ -622,18 +623,13 @@ static int wkup_m3_ipc_probe(struct platform_device *pdev)
 	if (!m3_ipc)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	m3_ipc->ipc_mem_base = devm_ioremap_resource(dev, res);
-	if (IS_ERR(m3_ipc->ipc_mem_base)) {
-		dev_err(dev, "could not ioremap ipc_mem\n");
+	m3_ipc->ipc_mem_base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(m3_ipc->ipc_mem_base))
 		return PTR_ERR(m3_ipc->ipc_mem_base);
-	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "no irq resource\n");
+	if (irq < 0)
 		return irq;
-	}
 
 	ret = devm_request_irq(dev, irq, wkup_m3_txev_handler,
 			       0, "wkup_m3_txev", m3_ipc);
@@ -676,29 +672,28 @@ static int wkup_m3_ipc_probe(struct platform_device *pdev)
 
 	m3_ipc->ops = &ipc_ops;
 
-	if (of_find_property(np, "ti,needs-vtt-toggle", NULL) &&
-	    !(of_property_read_u32(np, "ti,vtt-gpio-pin", &temp))) {
+	if (!of_property_read_u32(np, "ti,vtt-gpio-pin", &temp)) {
 		if (temp >= 0 && temp <= 31)
 			wkup_m3_set_vtt_gpio(m3_ipc, temp);
 		else
 			dev_warn(dev, "Invalid VTT GPIO(%d) pin\n", temp);
 	}
 
-	if (of_find_property(np, "ti,set-io-isolation", NULL))
+	if (of_property_read_bool(np, "ti,set-io-isolation"))
 		wkup_m3_set_io_isolation(m3_ipc);
 
-	ret = of_property_read_string(np, "ti,scale-data-fw",
+	ret = of_property_read_string(np, "firmware-name",
 				      &m3_ipc->sd_fw_name);
 	if (ret) {
 		dev_dbg(dev, "Voltage scaling data blob not provided from DT.\n");
-	};
+	}
 
 	/*
 	 * Wait for firmware loading completion in a thread so we
 	 * can boot the wkup_m3 as soon as it's ready without holding
 	 * up kernel boot
 	 */
-	task = kthread_run((void *)wkup_m3_rproc_boot_thread, m3_ipc,
+	task = kthread_run(wkup_m3_rproc_boot_thread, m3_ipc,
 			   "wkup_m3_rproc_loader");
 
 	if (IS_ERR(task)) {

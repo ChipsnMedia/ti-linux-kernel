@@ -172,14 +172,14 @@ int jfs_mount(struct super_block *sb)
 	}
 	jfs_info("jfs_mount: ipimap:0x%p", ipimap);
 
-	/* map further access of per fileset inodes by the fileset inode */
-	sbi->ipimap = ipimap;
-
 	/* initialize fileset inode allocation map */
 	if ((rc = diMount(ipimap))) {
 		jfs_err("jfs_mount: diMount failed w/rc = %d", rc);
 		goto err_ipimap;
 	}
+
+	/* map further access of per fileset inodes by the fileset inode */
+	sbi->ipimap = ipimap;
 
 	return rc;
 
@@ -234,11 +234,15 @@ int jfs_mount_rw(struct super_block *sb, int remount)
 
 		truncate_inode_pages(sbi->ipimap->i_mapping, 0);
 		truncate_inode_pages(sbi->ipbmap->i_mapping, 0);
+
+		IWRITE_LOCK(sbi->ipimap, RDWRLOCK_IMAP);
 		diUnmount(sbi->ipimap, 1);
 		if ((rc = diMount(sbi->ipimap))) {
+			IWRITE_UNLOCK(sbi->ipimap);
 			jfs_err("jfs_mount_rw: diMount failed!");
 			return rc;
 		}
+		IWRITE_UNLOCK(sbi->ipimap);
 
 		dbUnmount(sbi->ipbmap, 1);
 		if ((rc = dbMount(sbi->ipbmap))) {
@@ -307,13 +311,11 @@ static int chkSuper(struct super_block *sb)
 	}
 
 	bsize = le32_to_cpu(j_sb->s_bsize);
-#ifdef _JFS_4K
 	if (bsize != PSIZE) {
-		jfs_err("Currently only 4K block size supported!");
+		jfs_err("Only 4K block size supported!");
 		rc = -EINVAL;
 		goto out;
 	}
-#endif				/* _JFS_4K */
 
 	jfs_info("superblock: flag:0x%08x state:0x%08x size:0x%Lx",
 		 le32_to_cpu(j_sb->s_flag), le32_to_cpu(j_sb->s_state),
