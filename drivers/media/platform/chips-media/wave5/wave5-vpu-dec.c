@@ -1737,7 +1737,8 @@ static void wave5_vpu_dec_device_run(void *priv)
 		}
 		break;
 	default:
-		WARN(1, "Execution of a job in state %s illegal.\n", state_to_str(inst->state));
+		if (!v4l2_m2m_has_stopped(m2m_ctx))
+			WARN(1, "Execution of a job in state %s illegal.\n", state_to_str(inst->state));
 		break;
 	}
 
