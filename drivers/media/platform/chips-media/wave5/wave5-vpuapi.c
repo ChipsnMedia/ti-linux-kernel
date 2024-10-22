@@ -197,6 +197,8 @@ int wave5_vpu_dec_close(struct vpu_instance *inst, u32 *fail_res)
 	int retry = 0;
 	struct vpu_device *vpu_dev = inst->dev;
 	int i;
+	int inst_count = 0;
+	struct vpu_instance *inst_elm;
 
 	*fail_res = 0;
 	if (!inst->codec_info)
@@ -238,9 +240,13 @@ int wave5_vpu_dec_close(struct vpu_instance *inst, u32 *fail_res)
 
 	wave5_vdi_free_dma_memory(vpu_dev, &p_dec_info->vb_task);
 
+	list_for_each_entry(inst_elm, &vpu_dev->instances, list)
+		inst_count++;
+	if (inst_count == 1)
+		pm_runtime_dont_use_autosuspend(vpu_dev->dev);
+
 unlock_and_return:
 	mutex_unlock(&vpu_dev->hw_lock);
-	mutex_destroy(&inst->feed_lock);
 	pm_runtime_put_sync(inst->dev->dev);
 	return ret;
 }
@@ -704,6 +710,8 @@ int wave5_vpu_enc_close(struct vpu_instance *inst, u32 *fail_res)
 	int ret;
 	int retry = 0;
 	struct vpu_device *vpu_dev = inst->dev;
+	int inst_count = 0;
+	struct vpu_instance *inst_elm;
 
 	*fail_res = 0;
 	if (!inst->codec_info)
@@ -712,19 +720,23 @@ int wave5_vpu_enc_close(struct vpu_instance *inst, u32 *fail_res)
 	pm_runtime_resume_and_get(inst->dev->dev);
 
 	ret = mutex_lock_interruptible(&vpu_dev->hw_lock);
-	if (ret)
+	if (ret) {
+		pm_runtime_resume_and_get(inst->dev->dev);
 		return ret;
+	}
 
 	do {
 		ret = wave5_vpu_enc_finish_seq(inst, fail_res);
 		if (ret < 0 && *fail_res != WAVE5_SYSERR_VPU_STILL_RUNNING) {
 			dev_warn(inst->dev->dev, "enc_finish_seq timed out\n");
+			pm_runtime_resume_and_get(inst->dev->dev);
 			mutex_unlock(&vpu_dev->hw_lock);
 			return ret;
 		}
 
 		if (*fail_res == WAVE5_SYSERR_VPU_STILL_RUNNING &&
 		    retry++ >= MAX_FIRMWARE_CALL_RETRY) {
+			pm_runtime_resume_and_get(inst->dev->dev);
 			mutex_unlock(&vpu_dev->hw_lock);
 			return -ETIMEDOUT;
 		}
@@ -742,9 +754,15 @@ int wave5_vpu_enc_close(struct vpu_instance *inst, u32 *fail_res)
 	}
 
 	wave5_vdi_free_dma_memory(vpu_dev, &p_enc_info->vb_task);
-	mutex_unlock(&vpu_dev->hw_lock);
 
+	list_for_each_entry(inst_elm, &vpu_dev->instances, list)
+		inst_count++;
+	if (inst_count == 1)
+		pm_runtime_dont_use_autosuspend(vpu_dev->dev);
+
+	mutex_unlock(&vpu_dev->hw_lock);
 	pm_runtime_put_sync(inst->dev->dev);
+
 	return 0;
 }
 
@@ -824,21 +842,6 @@ static int wave5_check_enc_param(struct vpu_instance *inst, struct enc_param *pa
 		return -EINVAL;
 
 	return 0;
-}
-
-int wave5_vpu_enc_change_param(struct vpu_instance *inst, u32 *fail_res)
-{
-	int ret;
-	struct vpu_device *vpu_dev = inst->dev;
-
-	ret = mutex_lock_interruptible(&vpu_dev->hw_lock);
-	if (ret)
-		return ret;
-
-	ret = wave5_vpu_enc_apply_change_param(inst, fail_res);
-	mutex_unlock(&vpu_dev->hw_lock);
-
-	return ret;
 }
 
 int wave5_vpu_enc_start_one_frame(struct vpu_instance *inst, struct enc_param *param, u32 *fail_res)

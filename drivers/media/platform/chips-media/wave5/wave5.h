@@ -22,6 +22,12 @@
  */
 #define BSOPTION_ENABLE_EXPLICIT_END		BIT(0)
 #define BSOPTION_HIGHLIGHT_STREAM_END		BIT(1)
+/*
+ * When RD_PTR_VALID_FLAG is 0 Wave515 ignores RD_PTR value and starts to
+ * decode from the access unit end position of the last decoded picture in
+ * bitstream buffer.
+ */
+#define BSOPTION_RD_PTR_VALID_FLAG		BIT(31)
 
 /*
  * Currently the driver only supports hardware with little endian but for source
@@ -107,8 +113,6 @@ int wave5_vpu_enc_register_framebuffer(struct device *dev, struct vpu_instance *
 				       unsigned int count);
 
 int wave5_vpu_encode(struct vpu_instance *inst, struct enc_param *option, u32 *fail_res);
-
-int wave5_vpu_enc_apply_change_param(struct vpu_instance *inst, u32 *fail_res);
 
 int wave5_vpu_enc_get_result(struct vpu_instance *inst, struct enc_output_info *result);
 

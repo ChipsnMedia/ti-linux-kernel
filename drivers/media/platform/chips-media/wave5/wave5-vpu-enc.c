@@ -68,21 +68,27 @@ static const struct vpu_format enc_fmt_list[FMT_TYPES][MAX_FMTS] = {
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_YUV422P,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_NV16,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_NV61,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_YUV422M,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_NV16M,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 		{
 			.v4l2_pix_fmt = V4L2_PIX_FMT_NV61M,
+			.v4l2_frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW],
 		},
 	}
 };
@@ -134,30 +140,6 @@ static int start_encode(struct vpu_instance *inst, u32 *fail_res)
 
 	memset(&pic_param, 0, sizeof(struct enc_param));
 	memset(&frame_buf, 0, sizeof(struct frame_buffer));
-
-	if (inst->change_param_flags) {
-		struct enc_output_info enc_output_info;
-
-		wave5_vpu_enc_change_param(inst, NULL);
-		inst->change_param_flags = 0;
-		if (wave5_vpu_wait_interrupt(inst, VPU_ENC_TIMEOUT) < 0) {
-			dev_dbg(inst->dev->dev, "%s: wave5_vpu_wait_interrupt failed\n", __func__);
-			return -EINVAL;
-		}
-
-		ret = wave5_vpu_enc_get_output_info(inst, &enc_output_info);
-		if (ret) {
-			dev_dbg(inst->dev->dev,
-				"%s: vpu_enc_get_output_info fail: %d  reason: %u | info: %u\n",
-				__func__, ret, enc_output_info.error_reason, enc_output_info.warn_info);
-			return -EINVAL;
-		}
-
-		if (enc_output_info.recon_frame_index == RECON_IDX_FLAG_CHANGE_PARAM)
-			dev_dbg(inst->dev->dev, "%s: the change param done\n", __func__);
-		else
-			return -EINVAL;
-	}
 
 	info = v4l2_format_info(inst->src_fmt.pixelformat);
 	if (!info)
@@ -216,11 +198,6 @@ static int start_encode(struct vpu_instance *inst, u32 *fail_res)
 	pic_param.source_frame = &frame_buf;
 	pic_param.code_option.implicit_header_encode = 1;
 	pic_param.code_option.encode_aud = inst->encode_aud;
-	if (inst->enc_param.forced_idr_pictype_enable) {
-		pic_param.force_pic_type = 3;  /* IDR Frame */
-		pic_param.force_pictype_enable = 1;
-		inst->enc_param.forced_idr_pictype_enable = 0;
-	}
 	ret = wave5_vpu_enc_start_one_frame(inst, &pic_param, fail_res);
 	if (ret) {
 		if (*fail_res == WAVE5_SYSERR_QUEUEING_FAIL)
@@ -333,16 +310,11 @@ static void wave5_vpu_enc_finish_encode(struct vpu_instance *inst)
 		dst_buf->vb2_buf.timestamp = inst->timestamp;
 		dst_buf->field = V4L2_FIELD_NONE;
 		if (enc_output_info.pic_type == PIC_TYPE_I) {
-			if (inst->std == W_HEVC_ENC &&
-				(enc_output_info.enc_vcl_nut == 19 ||
-				enc_output_info.enc_vcl_nut == 20)) {
+			if (enc_output_info.enc_vcl_nut == 19 ||
+			    enc_output_info.enc_vcl_nut == 20)
 				dst_buf->flags |= V4L2_BUF_FLAG_KEYFRAME;
-			} else if (inst->std == W_AVC_ENC &&
-				enc_output_info.enc_vcl_nut == 5) {
-				dst_buf->flags |= V4L2_BUF_FLAG_KEYFRAME;
-			} else {
+			else
 				dst_buf->flags |= V4L2_BUF_FLAG_PFRAME;
-			}
 		} else if (enc_output_info.pic_type == PIC_TYPE_P) {
 			dst_buf->flags |= V4L2_BUF_FLAG_PFRAME;
 		} else if (enc_output_info.pic_type == PIC_TYPE_B) {
@@ -406,6 +378,7 @@ static int wave5_vpu_enc_enum_fmt_cap(struct file *file, void *fh, struct v4l2_f
 static int wave5_vpu_enc_try_fmt_cap(struct file *file, void *fh, struct v4l2_format *f)
 {
 	struct vpu_instance *inst = wave5_to_vpu_inst(fh);
+	const struct v4l2_frmsize_stepwise *frmsize;
 	const struct vpu_format *vpu_fmt;
 	int width, height;
 
@@ -418,16 +391,16 @@ static int wave5_vpu_enc_try_fmt_cap(struct file *file, void *fh, struct v4l2_fo
 		width = inst->dst_fmt.width;
 		height = inst->dst_fmt.height;
 		f->fmt.pix_mp.pixelformat = inst->dst_fmt.pixelformat;
+		frmsize = &enc_frmsize[VPU_FMT_TYPE_CODEC];
 	} else {
 		width = f->fmt.pix_mp.width;
 		height = f->fmt.pix_mp.height;
 		f->fmt.pix_mp.pixelformat = vpu_fmt->v4l2_pix_fmt;
+		frmsize = vpu_fmt->v4l2_frmsize;
 	}
 
 	wave5_update_pix_fmt(&f->fmt.pix_mp, VPU_FMT_TYPE_CODEC,
-					     width,
-					     height,
-					     vpu_fmt->v4l2_frmsize);
+			     width, height, frmsize);
 	f->fmt.pix_mp.colorspace = inst->colorspace;
 	f->fmt.pix_mp.ycbcr_enc = inst->ycbcr_enc;
 	f->fmt.pix_mp.quantization = inst->quantization;
@@ -514,6 +487,7 @@ static int wave5_vpu_enc_enum_fmt_out(struct file *file, void *fh, struct v4l2_f
 static int wave5_vpu_enc_try_fmt_out(struct file *file, void *fh, struct v4l2_format *f)
 {
 	struct vpu_instance *inst = wave5_to_vpu_inst(fh);
+	const struct v4l2_frmsize_stepwise *frmsize;
 	const struct vpu_format *vpu_fmt;
 	int width, height;
 
@@ -526,17 +500,16 @@ static int wave5_vpu_enc_try_fmt_out(struct file *file, void *fh, struct v4l2_fo
 		width = inst->src_fmt.width;
 		height = inst->src_fmt.height;
 		f->fmt.pix_mp.pixelformat = inst->src_fmt.pixelformat;
+		frmsize = &enc_frmsize[VPU_FMT_TYPE_RAW];
 	} else {
 		width = f->fmt.pix_mp.width;
 		height = f->fmt.pix_mp.height;
 		f->fmt.pix_mp.pixelformat = vpu_fmt->v4l2_pix_fmt;
+		frmsize = vpu_fmt->v4l2_frmsize;
 	}
 
 	wave5_update_pix_fmt(&f->fmt.pix_mp, VPU_FMT_TYPE_RAW,
-					     width,
-					     height,
-					     vpu_fmt->v4l2_frmsize);
-
+			     width, height, frmsize);
 	return 0;
 }
 
@@ -593,9 +566,8 @@ static int wave5_vpu_enc_s_fmt_out(struct file *file, void *fh, struct v4l2_form
 		return -EINVAL;
 
 	wave5_update_pix_fmt(&inst->dst_fmt, VPU_FMT_TYPE_CODEC,
-					     f->fmt.pix_mp.width,
-					     f->fmt.pix_mp.height,
-					     vpu_fmt->v4l2_frmsize);
+			     f->fmt.pix_mp.width, f->fmt.pix_mp.height,
+			     vpu_fmt->v4l2_frmsize);
 	inst->conf_win.width = inst->dst_fmt.width;
 	inst->conf_win.height = inst->dst_fmt.height;
 
@@ -804,8 +776,6 @@ static int wave5_vpu_enc_s_ctrl(struct v4l2_ctrl *ctrl)
 		}
 		break;
 	case V4L2_CID_MPEG_VIDEO_BITRATE:
-		if (inst->state == VPU_INST_STATE_PIC_RUN)
-			inst->change_param_flags |= W5_ENC_CHANGE_PARAM_RC_TARGET_RATE;
 		inst->bit_rate = ctrl->val;
 		break;
 	case V4L2_CID_MPEG_VIDEO_GOP_SIZE:
@@ -964,8 +934,6 @@ static int wave5_vpu_enc_s_ctrl(struct v4l2_ctrl *ctrl)
 		case V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE:
 			inst->enc_param.profile = H264_PROFILE_BP;
 			inst->bit_depth = 8;
-			if (ctrl->val == V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE)
-				inst->enc_param.constraint_set1_flag = 1;
 			break;
 		case V4L2_MPEG_VIDEO_H264_PROFILE_MAIN:
 			inst->enc_param.profile = H264_PROFILE_MP;
@@ -1105,9 +1073,6 @@ static int wave5_vpu_enc_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR:
 		inst->enc_param.forced_idr_header_enable = ctrl->val;
 		break;
-	case V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME:
-		inst->enc_param.forced_idr_pictype_enable = 1;
-		break;
 	case V4L2_CID_MIN_BUFFERS_FOR_OUTPUT:
 		break;
 	default:
@@ -1173,7 +1138,7 @@ static void wave5_vpu_enc_buf_queue(struct vb2_buffer *vb)
 }
 
 static int wave5_set_enc_openparam(struct enc_open_param *open_param,
-				    struct vpu_instance *inst)
+				   struct vpu_instance *inst)
 {
 	struct enc_wave_param input = inst->enc_param;
 	const struct v4l2_format_info *info;
@@ -1243,10 +1208,9 @@ static int wave5_set_enc_openparam(struct enc_open_param *open_param,
 			open_param->wave_param.decoding_refresh_type = DEC_REFRESH_TYPE_IDR;
 			open_param->wave_param.intra_period = input.avc_idr_period;
 		}
-	} else if (inst->std == W_AVC_ENC)
-		open_param->wave_param.constraint_set1_flag = input.constraint_set1_flag;
-	else
+	} else {
 		open_param->wave_param.avc_idr_period = input.avc_idr_period;
+	}
 	open_param->wave_param.entropy_coding_mode = input.entropy_coding_mode;
 	open_param->wave_param.lossless_enable = input.lossless_enable;
 	open_param->wave_param.const_intra_pred_flag = input.const_intra_pred_flag;
@@ -1308,7 +1272,7 @@ static int initialize_sequence(struct vpu_instance *inst)
 		__func__, initial_info.min_frame_buffer_count,
 		initial_info.min_src_frame_count);
 	inst->min_src_buf_count = initial_info.min_src_frame_count +
-				  COMMAND_QUEUE_DEPTH;
+				  WAVE521_COMMAND_QUEUE_DEPTH;
 
 	ctrl = v4l2_ctrl_find(&inst->v4l2_ctrl_hdl,
 			      V4L2_CID_MIN_BUFFERS_FOR_OUTPUT);
@@ -1519,15 +1483,13 @@ static void wave5_set_default_format(struct v4l2_pix_format_mplane *src_fmt,
 {
 	src_fmt->pixelformat = enc_fmt_list[VPU_FMT_TYPE_RAW][0].v4l2_pix_fmt;
 	wave5_update_pix_fmt(src_fmt, VPU_FMT_TYPE_RAW,
-				      W5_DEF_ENC_PIC_WIDTH,
-				      W5_DEF_ENC_PIC_HEIGHT,
-				      &enc_frmsize[VPU_FMT_TYPE_RAW]);
+			     W5_DEF_ENC_PIC_WIDTH, W5_DEF_ENC_PIC_HEIGHT,
+			     &enc_frmsize[VPU_FMT_TYPE_RAW]);
 
 	dst_fmt->pixelformat = enc_fmt_list[VPU_FMT_TYPE_CODEC][0].v4l2_pix_fmt;
 	wave5_update_pix_fmt(dst_fmt, VPU_FMT_TYPE_CODEC,
-				      W5_DEF_ENC_PIC_WIDTH,
-				      W5_DEF_ENC_PIC_HEIGHT,
-				      &enc_frmsize[VPU_FMT_TYPE_CODEC]);
+			     W5_DEF_ENC_PIC_WIDTH, W5_DEF_ENC_PIC_HEIGHT,
+			     &enc_frmsize[VPU_FMT_TYPE_CODEC]);
 }
 
 static int wave5_vpu_enc_queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
@@ -1724,7 +1686,7 @@ static int wave5_vpu_open_enc(struct file *filp)
 			  -6, 6, 1, 0);
 	v4l2_ctrl_new_std(v4l2_ctrl_hdl, &wave5_vpu_enc_ctrl_ops,
 			  V4L2_CID_MPEG_VIDEO_H264_8X8_TRANSFORM,
-			  0, 1, 1, 0);
+			  0, 1, 1, 1);
 	v4l2_ctrl_new_std(v4l2_ctrl_hdl, &wave5_vpu_enc_ctrl_ops,
 			  V4L2_CID_MPEG_VIDEO_H264_CONSTRAINED_INTRA_PREDICTION,
 			  0, 1, 1, 0);
@@ -1781,9 +1743,6 @@ static int wave5_vpu_open_enc(struct file *filp)
 	v4l2_ctrl_new_std(v4l2_ctrl_hdl, &wave5_vpu_enc_ctrl_ops,
 			  V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR,
 			  0, 1, 1, 0);
-	v4l2_ctrl_new_std(v4l2_ctrl_hdl, &wave5_vpu_enc_ctrl_ops,
-			  V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME,
-			  0, 0, 0, 0);
 
 	if (v4l2_ctrl_hdl->error) {
 		ret = -ENODEV;
@@ -1817,9 +1776,8 @@ static int wave5_vpu_open_enc(struct file *filp)
 	if (ret)
 		goto cleanup_inst;
 
-	if (dev->irq < 0 && !hrtimer_active(&dev->hrtimer) && list_empty(&dev->instances))
-		hrtimer_start(&dev->hrtimer, ns_to_ktime(dev->vpu_poll_interval * NSEC_PER_MSEC),
-			      HRTIMER_MODE_REL_PINNED);
+	if (list_empty(&dev->instances))
+		pm_runtime_use_autosuspend(inst->dev->dev);
 
 	list_add_tail(&inst->list, &dev->instances);
 

@@ -31,7 +31,13 @@ void wave5_cleanup_instance(struct vpu_instance *inst)
 {
 	int i;
 
-	if (list_is_singular(&inst->list))
+	/*
+	 * For Wave515 SRAM memory is allocated at
+	 * wave5_vpu_dec_register_device() and freed at
+	 * wave5_vpu_dec_unregister_device().
+	 */
+	if (list_is_singular(&inst->list) &&
+	    inst->dev->product_code != WAVE515_CODE)
 		wave5_vdi_free_sram(inst->dev);
 
 	for (i = 0; i < inst->fbc_buf_count; i++)
@@ -54,14 +60,7 @@ int wave5_vpu_release_device(struct file *filp,
 			     char *name)
 {
 	struct vpu_instance *inst = wave5_to_vpu_inst(filp->private_data);
-	struct vpu_device *dev = inst->dev;
 	int ret = 0;
-
-	if (inst->run_thread) {
-		kthread_stop(inst->run_thread);
-		up(&inst->run_sem);
-		inst->run_thread = NULL;
-	}
 
 	v4l2_m2m_ctx_release(inst->v4l2_fh.m2m_ctx);
 	if (inst->state != VPU_INST_STATE_NONE) {
@@ -80,18 +79,6 @@ int wave5_vpu_release_device(struct file *filp,
 	}
 
 	wave5_cleanup_instance(inst);
-	if (dev->irq < 0) {
-		ret = mutex_lock_interruptible(&dev->dev_lock);
-		if (ret)
-			return ret;
-
-		if (list_empty(&dev->instances)) {
-			dev_dbg(dev->dev, "Disabling the hrtimer\n");
-			hrtimer_cancel(&dev->hrtimer);
-		}
-
-		mutex_unlock(&dev->dev_lock);
-	}
 
 	return ret;
 }
