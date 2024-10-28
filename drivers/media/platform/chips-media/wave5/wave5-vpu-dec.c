@@ -1542,7 +1542,7 @@ static void wave5_vpu_dec_stop_streaming(struct vb2_queue *q)
 
 		wave5_vpu_dec_give_command(inst, DEC_GET_QUEUE_STATUS, &q_status);
 
-		if (q_status.instance_queue_count == 0 &&
+		if ((inst->state == VPU_INST_STATE_STOP || q_status.instance_queue_count == 0) &&
 		    q_status.report_queue_count == 0)
 			break;
 
