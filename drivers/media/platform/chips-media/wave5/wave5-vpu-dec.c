@@ -1929,8 +1929,8 @@ static int wave5_vpu_open_dec(struct file *filp)
 	if (ret)
 		goto cleanup_inst;
 
-	if (list_empty(&dev->instances))
-		pm_runtime_use_autosuspend(inst->dev->dev);
+	//if (list_empty(&dev->instances))
+	//	pm_runtime_use_autosuspend(inst->dev->dev);
 
 	list_add_tail(&inst->list, &dev->instances);
 

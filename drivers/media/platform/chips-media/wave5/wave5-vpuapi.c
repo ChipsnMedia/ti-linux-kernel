@@ -250,14 +250,13 @@ int wave5_vpu_dec_close(struct vpu_instance *inst, u32 *fail_res)
 
 	wave5_vdi_free_dma_memory(vpu_dev, &p_dec_info->vb_task);
 
-	list_for_each_entry(inst_elm, &vpu_dev->instances, list)
-		inst_count++;
-	if (inst_count == 1)
-		pm_runtime_dont_use_autosuspend(vpu_dev->dev);
+	//list_for_each_entry(inst_elm, &vpu_dev->instances, list)
+	//	inst_count++;
+	//if (inst_count == 1)
+	//	pm_runtime_dont_use_autosuspend(vpu_dev->dev);
 
 unlock_and_return:
 	mutex_unlock(&vpu_dev->hw_lock);
-	mutex_destroy(&inst->feed_lock);
 	pm_runtime_put_sync(inst->dev->dev);
 	return ret;
 }

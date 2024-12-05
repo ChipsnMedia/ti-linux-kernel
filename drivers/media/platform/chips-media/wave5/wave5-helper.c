@@ -49,11 +49,8 @@ void wave5_cleanup_instance(struct vpu_instance *inst)
 		v4l2_fh_exit(&inst->v4l2_fh);
 	}
 
-	mutex_lock(&inst->dev->irq_lock);
-	list_del_init(&inst->list);
-	mutex_unlock(&inst->dev->irq_lock);
-
 	kfifo_free(&inst->irq_status);
+	mutex_destroy(&inst->feed_lock);
 	ida_free(&inst->dev->inst_ida, inst->id);
 	kfree(inst->codec_info);
 	kfree(inst);
@@ -71,6 +68,10 @@ int wave5_vpu_release_device(struct file *filp,
 		up(&inst->run_sem);
 		inst->run_thread = NULL;
 	}
+
+	mutex_lock(&inst->dev->irq_lock);
+	list_del_init(&inst->list);
+	mutex_unlock(&inst->dev->irq_lock);
 
 	v4l2_m2m_ctx_release(inst->v4l2_fh.m2m_ctx);
 	if (inst->state != VPU_INST_STATE_NONE) {
