@@ -1747,12 +1747,12 @@ static void wave5_vpu_dec_device_run(void *priv)
 	default:
 		if (!v4l2_m2m_has_stopped(m2m_ctx))
 			WARN(1, "Execution of a job in state %s illegal.\n", state_to_str(inst->state));
-		break;
+		return;
 	}
 
 finish_job_and_return:
-	dev_dbg(inst->dev->dev, "%s: leave and finish job", __func__);
 	up(&inst->run_sem);
+	dev_dbg(inst->dev->dev, "%s: leave and finish job", __func__);
 }
 
 static void wave5_vpu_dec_job_abort(void *priv)
@@ -1764,10 +1764,7 @@ static void wave5_vpu_dec_job_abort(void *priv)
 	if (ret)
 		return;
 
-	ret = wave5_vpu_dec_set_eos_on_firmware(inst);
-	if (ret)
-		dev_warn(inst->dev->dev,
-			 "Setting EOS for the bitstream, fail: %d\n", ret);
+	v4l2_m2m_job_finish(inst->v4l2_m2m_dev, inst->v4l2_fh.m2m_ctx);
 }
 
 static int wave5_vpu_dec_job_ready(void *priv)

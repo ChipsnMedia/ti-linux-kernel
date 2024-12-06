@@ -233,6 +233,16 @@ int wave5_vpu_dec_close(struct vpu_instance *inst, u32 *fail_res)
 		    retry++ >= MAX_FIRMWARE_CALL_RETRY) {
 			ret = -ETIMEDOUT;
 			goto unlock_and_return;
+		} else if (*fail_res == WAVE5_SYSERR_VPU_STILL_RUNNING) {
+			struct dec_output_info dec_info;
+
+			mutex_unlock(&vpu_dev->hw_lock);
+			wave5_vpu_dec_get_output_info(inst, &dec_info);
+			ret = mutex_lock_interruptible(&vpu_dev->hw_lock);
+			if (ret) {
+				pm_runtime_put_sync(inst->dev->dev);
+				return ret;
+			}
 		}
 	} while (ret != 0);
 

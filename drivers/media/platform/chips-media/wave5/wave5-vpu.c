@@ -55,6 +55,7 @@ static void wave5_vpu_handle_irq(void *dev_id)
 	struct vpu_instance *inst,*tmp;
 	struct vpu_device *dev = dev_id;
 	int val;
+	unsigned long flags;
 
 	irq_reason = wave5_vdi_read_register(dev, W5_VPU_VINT_REASON);
 	seq_done = wave5_vdi_read_register(dev, W5_RET_SEQ_DONE_INSTANCE_INFO);
@@ -66,6 +67,7 @@ static void wave5_vpu_handle_irq(void *dev_id)
 	wave5_vdi_write_register(dev, W5_VPU_VINT_REASON_CLR, irq_reason);
 	wave5_vdi_write_register(dev, W5_VPU_VINT_CLEAR, 0x1);
 
+	spin_lock_irqsave(&dev->irq_spinlock, flags);
 	list_for_each_entry_safe(inst, tmp, &dev->instances, list) {
 		if (irq_reason & BIT(INT_WAVE5_INIT_SEQ) ||
 		    irq_reason & BIT(INT_WAVE5_ENC_SET_PARAM)) {
@@ -98,6 +100,7 @@ static void wave5_vpu_handle_irq(void *dev_id)
 			}
 		}
 	}
+	spin_unlock_irqrestore(&dev->irq_spinlock, flags);
 
 	up(&dev->irq_sem);
 }
@@ -263,6 +266,7 @@ static int wave5_vpu_probe(struct platform_device *pdev)
 	mutex_init(&dev->dev_lock);
 	mutex_init(&dev->hw_lock);
 	mutex_init(&dev->irq_lock);
+	spin_lock_init(&dev->irq_spinlock);
 	dev_set_drvdata(&pdev->dev, dev);
 	dev->dev = &pdev->dev;
 

@@ -164,7 +164,7 @@ enum set_param_option {
 
 #define BUFFER_MARGIN				4096
 
-#define MAX_FIRMWARE_CALL_RETRY			10
+#define MAX_FIRMWARE_CALL_RETRY			30
 
 #define VDI_LITTLE_ENDIAN	0x0
 
@@ -770,6 +770,7 @@ struct vpu_device {
 	struct task_struct *irq_thread;
 	struct semaphore irq_sem;
 	struct reset_control *resets;
+	spinlock_t irq_spinlock;
 };
 
 struct vpu_instance;
