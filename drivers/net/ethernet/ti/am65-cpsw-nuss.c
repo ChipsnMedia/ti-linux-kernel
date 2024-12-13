@@ -2152,6 +2152,8 @@ static void am65_cpsw_nuss_free_tx_chns(void *data)
 	for (i = 0; i < common->tx_ch_num; i++) {
 		struct am65_cpsw_tx_chn *tx_chn = &common->tx_chns[i];
 
+		irq_set_affinity_hint(tx_chn->irq, NULL);
+
 		if (!IS_ERR_OR_NULL(tx_chn->desc_pool))
 			k3_cppi_desc_pool_destroy(tx_chn->desc_pool);
 
@@ -2173,8 +2175,10 @@ void am65_cpsw_nuss_remove_tx_chns(struct am65_cpsw_common *common)
 	for (i = 0; i < common->tx_ch_num; i++) {
 		struct am65_cpsw_tx_chn *tx_chn = &common->tx_chns[i];
 
-		if (tx_chn->irq)
+		if (tx_chn->irq) {
+			irq_set_affinity_hint(tx_chn->irq, NULL);
 			devm_free_irq(dev, tx_chn->irq, tx_chn);
+		}
 
 		netif_napi_del(&tx_chn->napi_tx);
 
@@ -2210,6 +2214,7 @@ static int am65_cpsw_nuss_ndev_add_tx_napi(struct am65_cpsw_common *common)
 				tx_chn->id, tx_chn->irq, ret);
 			goto err;
 		}
+		irq_set_affinity_hint(tx_chn->irq, get_cpu_mask(i % num_online_cpus()));
 	}
 
 err:
@@ -2310,6 +2315,8 @@ static void am65_cpsw_nuss_free_rx_chns(void *data)
 
 	rx_chn = &common->rx_chns;
 
+	irq_set_affinity_hint(rx_chn->irq, NULL);
+
 	if (!IS_ERR_OR_NULL(rx_chn->desc_pool))
 		k3_cppi_desc_pool_destroy(rx_chn->desc_pool);
 
@@ -2326,8 +2333,10 @@ static void am65_cpsw_nuss_remove_rx_chns(void *data)
 	rx_chn = &common->rx_chns;
 	devm_remove_action(dev, am65_cpsw_nuss_free_rx_chns, common);
 
-	if (!(rx_chn->irq < 0))
+	if (!(rx_chn->irq < 0)) {
+		irq_set_affinity_hint(rx_chn->irq, NULL);
 		devm_free_irq(dev, rx_chn->irq, common);
+	}
 
 	netif_napi_del(&common->napi_rx);
 
@@ -2447,6 +2456,7 @@ static int am65_cpsw_nuss_init_rx_chns(struct am65_cpsw_common *common)
 			rx_chn->irq, ret);
 		goto err;
 	}
+	irq_set_affinity_hint(rx_chn->irq, get_cpu_mask(cpumask_first(cpu_present_mask)));
 
 err:
 	i = devm_add_action(dev, am65_cpsw_nuss_free_rx_chns, common);
@@ -3265,6 +3275,8 @@ static void am65_cpsw_unregister_devlink(struct am65_cpsw_common *common)
 
 static int am65_cpsw_nuss_register_ndevs(struct am65_cpsw_common *common)
 {
+	struct am65_cpsw_rx_chn *rx_chan = &common->rx_chns;
+	struct am65_cpsw_tx_chn *tx_chan = common->tx_chns;
 	struct device *dev = common->dev;
 	struct am65_cpsw_port *port;
 	int ret = 0, i;
@@ -3276,6 +3288,22 @@ static int am65_cpsw_nuss_register_ndevs(struct am65_cpsw_common *common)
 	ret = am65_cpsw_nuss_init_rx_chns(common);
 	if (ret)
 		return ret;
+
+	/* The DMA Channels are not guaranteed to be in a clean state.
+	 * Reset and disable them to ensure that they are back to the
+	 * clean state and ready to be used.
+	 */
+	for (i = 0; i < common->tx_ch_num; i++) {
+		k3_udma_glue_reset_tx_chn(tx_chan[i].tx_chn, &tx_chan[i],
+					  am65_cpsw_nuss_tx_cleanup);
+		k3_udma_glue_disable_tx_chn(tx_chan[i].tx_chn);
+	}
+
+	for (i = 0; i < AM65_CPSW_MAX_RX_FLOWS; i++)
+		k3_udma_glue_reset_rx_chn(rx_chan->rx_chn, i, rx_chan,
+					  am65_cpsw_nuss_rx_cleanup, !!i);
+
+	k3_udma_glue_disable_rx_chn(rx_chan->rx_chn);
 
 	ret = am65_cpsw_nuss_register_devlink(common);
 	if (ret)

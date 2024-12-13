@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Device Tree file for the AM62P5-SK
- * Copyright (C) 2023 Texas Instruments Incorporated - https://www.ti.com/
+ * Copyright (C) 2023-2024 Texas Instruments Incorporated - https://www.ti.com/
  *
  * Schematics: https://www.ti.com/lit/zip/sprr487
  */
@@ -11,6 +11,7 @@
 #include <dt-bindings/leds/common.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/net/ti-dp83867.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
 #include "k3-am62p5.dtsi"
 
 / {
@@ -32,7 +33,23 @@
 	};
 
 	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
 		stdout-path = &main_uart0;
+
+		framebuffer0: framebuffer@0 {
+			compatible = "simple-framebuffer";
+			power-domains = <&k3_pds 186 TI_SCI_PD_EXCLUSIVE>,
+					<&k3_pds 243 TI_SCI_PD_EXCLUSIVE>,	/* OLDI0 */
+					<&k3_pds 244 TI_SCI_PD_EXCLUSIVE>;	/* OLDI1 */
+			clocks = <&k3_clks 186 6>,
+				 <&dss0_vp1_clk>,
+				 <&k3_clks 186 2>;
+			display = <&dss0>;
+			status = "disabled";
+		};
 	};
 
 	memory@80000000 {
@@ -43,7 +60,7 @@
 		bootph-pre-ram;
 	};
 
-	reserved-memory {
+	reserved_memory: reserved-memory {
 		#address-cells = <2>;
 		#size-cells = <2>;
 		ranges;
@@ -55,6 +72,36 @@
 			linux,cma-default;
 		};
 
+		rtos_ipc_memory_region: rtos-ipc-memory@9b500000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0x9b500000 0x00 0x00300000>;
+			no-map;
+		};
+
+		mcu_r5fss0_core0_dma_memory_region: mcu-r5fss-dma-memory-region@9b800000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0x9b800000 0x00 0x00100000>;
+			no-map;
+		};
+
+		mcu_r5fss0_core0_memory_region: mcu-r5fss-memory-region@9b900000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0x9b900000 0x00 0x00f00000>;
+			no-map;
+		};
+
+		wkup_r5fss0_core0_dma_memory_region: r5f-dma-memory@9c800000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0x9c800000 0x00 0x00100000>;
+			no-map;
+		};
+
+		wkup_r5fss0_core0_memory_region: r5f-memory@9c900000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0x9c900000 0x00 0x01e00000>;
+			no-map;
+		};
+
 		secure_tfa_ddr: tfa@9e780000 {
 			reg = <0x00 0x9e780000 0x00 0x80000>;
 			no-map;
@@ -62,12 +109,6 @@
 
 		secure_ddr: optee@9e800000 {
 			reg = <0x00 0x9e800000 0x00 0x01800000>; /* for OP-TEE */
-			no-map;
-		};
-
-		wkup_r5fss0_core0_memory_region: r5f-dma-memory@9c900000 {
-			compatible = "shared-dma-pool";
-			reg = <0x00 0x9c900000 0x00 0x01e00000>;
 			no-map;
 		};
 	};
@@ -120,7 +161,15 @@
 			 <3300000 0x1>;
 		bootph-all;
 	};
-
+       vcc_3v3_main: regulator-4 {
+	       compatible = "regulator-fixed";
+	       regulator-name = "vcc_3v3_main";
+	       regulator-min-microvolt = <3300000>;
+	       regulator-max-microvolt = <3300000>;
+	       vin-supply = <&vmain_pd>;
+	       regulator-always-on;
+	       regulator-boot-on;
+	};
 	leds {
 		compatible = "gpio-leds";
 		pinctrl-names = "default";
@@ -728,6 +777,26 @@
 	};
 };
 
+&wkup_r5fss0 {
+	status = "okay";
+};
+
+&wkup_r5fss0_core0 {
+	mboxes = <&mailbox0_cluster0 &mbox_r5_0>;
+	memory-region = <&wkup_r5fss0_core0_dma_memory_region>,
+			<&wkup_r5fss0_core0_memory_region>;
+};
+
+&mcu_r5fss0 {
+	status = "okay";
+};
+
+&mcu_r5fss0_core0 {
+	mboxes = <&mailbox0_cluster1 &mbox_mcu_r5_0>;
+	memory-region = <&mcu_r5fss0_core0_dma_memory_region>,
+			<&mcu_r5fss0_core0_memory_region>;
+};
+
 &main_uart0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&main_uart0_pins_default>;
@@ -749,6 +818,12 @@
 &mcu_pmx0 {
 	bootph-all;
 
+	pmic_irq_pins_default: pmic-irq-default-pins {
+	       pinctrl-single,pins = <
+		       AM62PX_MCU_IOPAD(0x000, PIN_INPUT, 7) /* (B10) MCU_GPIO0_0 */
+	       >;
+	};
+
 	wkup_uart0_pins_default: wkup-uart0-default-pins {
 		pinctrl-single,pins = <
 			AM62PX_MCU_IOPAD(0x024, PIN_INPUT, 0)	/* (D8) WKUP_UART0_RXD */
@@ -756,6 +831,14 @@
 		>;
 		bootph-all;
 	};
+
+	wkup_i2c0_pins_default: wkup-i2c0-default-pins {
+	       pinctrl-single,pins = <
+		       AM62PX_MCU_IOPAD(0x04c, PIN_INPUT, 0) /* (A13) WKUP_I2C0_SCL */
+		       AM62PX_MCU_IOPAD(0x050, PIN_INPUT, 0) /* (C11) WKUP_I2C0_SDA */
+	       >;
+	};
+
 };
 
 &wkup_uart0 {
@@ -766,16 +849,99 @@
 	bootph-all;
 };
 
+&wkup_i2c0 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&wkup_i2c0_pins_default>;
+	clock-frequency = <400000>;
+
+	tps65224: pmic@48 {
+	       compatible = "ti,tps65224-q1";
+	       reg = <0x48>;
+	       pinctrl-names = "default";
+	       pinctrl-0 = <&pmic_irq_pins_default>;
+	       interrupt-parent = <&mcu_gpio0>;
+	       interrupts = <0 IRQ_TYPE_EDGE_FALLING>;
+	       ti,primary-pmic;
+
+	       gpio-controller;
+	       #gpio-cells = <2>;
+
+	       buck12-supply = <&vcc_3v3_main>;
+	       buck3-supply = <&vcc_3v3_main>;
+	       buck4-supply = <&vcc_3v3_main>;
+
+	       ldo1-supply = <&vcc_3v3_main>;
+	       ldo2-supply = <&vcc_3v3_main>;
+	       ldo3-supply = <&buck3>;
+
+	       regulators {
+		       buck12: buck12 {
+			       regulator-name = "vcc_core_buck12";
+			       regulator-min-microvolt = <715000>;
+			       regulator-max-microvolt = <895000>;
+			       regulator-boot-on;
+			       regulator-always-on;
+		       };
+
+		       buck3: buck3 {
+			       regulator-name = "vcc1v8_sys_buck3";
+			       regulator-min-microvolt = <1800000>;
+			       regulator-max-microvolt = <1800000>;
+			       regulator-boot-on;
+			       regulator-always-on;
+		       };
+
+		       buck4: buck4 {
+			       regulator-name = "vcc1v1_buck4";
+			       regulator-min-microvolt = <1100000>;
+			       regulator-max-microvolt = <1100000>;
+			       regulator-boot-on;
+			       regulator-always-on;
+		       };
+
+		       ldo1: ldo1 {
+			       regulator-name = "vdda1v8_ldo1";
+			       regulator-min-microvolt = <1800000>;
+			       regulator-max-microvolt = <1800000>;
+			       regulator-boot-on;
+			       regulator-always-on;
+		       };
+
+		       ldo2: ldo2 {
+			       regulator-name = "dvdd3v3_ldo2";
+			       regulator-min-microvolt = <3300000>;
+			       regulator-max-microvolt = <3300000>;
+			       regulator-boot-on;
+			       regulator-always-on;
+		       };
+
+		       ldo3: ldo3 {
+			       regulator-name = "vcc_0v85_ldo3";
+			       regulator-min-microvolt = <850000>;
+			       regulator-max-microvolt = <850000>;
+			       regulator-boot-on;
+			       regulator-always-on;
+		       };
+	       };
+	};
+};
+
 /* mcu_gpio0 and mcu_gpio_intr are reserved for mcu firmware usage */
 &mcu_gpio0 {
-	status = "reserved";
+	status = "okay";
 };
 
 &mcu_gpio_intr {
-	status = "reserved";
+	status = "okay";
+};
+
+&dss_oldi_io_ctrl {
+	bootph-all;
 };
 
 &dss0 {
+	bootph-all;
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&main_dpi_pins_default>;
@@ -783,7 +949,7 @@
 
 &dss0_ports {
 	/* DSS0-VP2: DPI/HDMI Output */
-	port@1 {
+	hdmi0_dss: port@1 {
 		reg = <1>;
 
 		dss0_dpi1_out: endpoint {

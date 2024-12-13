@@ -589,6 +589,15 @@ static const struct ub960_format_info ub960_formats[] = {
 	{ .code	= MEDIA_BUS_FMT_SGRBG10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
 	{ .code	= MEDIA_BUS_FMT_SGBRG10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
 	{ .code	= MEDIA_BUS_FMT_SBGGR10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
+
+	{ .code	= MEDIA_BUS_FMT_SRGGI10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
+	{ .code	= MEDIA_BUS_FMT_SGRIG10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
+	{ .code	= MEDIA_BUS_FMT_SBGGI10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
+	{ .code	= MEDIA_BUS_FMT_SGBIG10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
+	{ .code	= MEDIA_BUS_FMT_SGIRG10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
+	{ .code	= MEDIA_BUS_FMT_SIGGR10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
+	{ .code	= MEDIA_BUS_FMT_SGIBG10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
+	{ .code	= MEDIA_BUS_FMT_SIGGB10_1X10, .bpp = 10, .datatype = MIPI_CSI2_DT_RAW10, },
 };
 
 static const struct ub960_format_info *ub960_find_format(u32 code)
@@ -2303,14 +2312,15 @@ static void ub960_get_vc_maps(struct ub960_data *priv, u8 *vc_map)
 	struct device *dev = &priv->client->dev;
 	u8 nport, available_vc = 0;
 
-	for (nport = 0;
-	     nport < priv->hw_data->num_rxports && priv->rxports[nport];
-	     ++nport) {
+	for (nport = 0; nport < priv->hw_data->num_rxports; ++nport) {
 		struct v4l2_mbus_frame_desc source_fd;
 		bool used_vc[UB960_MAX_VC] = {false};
 		u8 vc, cur_vc = available_vc;
 		int j, ret;
 		u8 map;
+
+		if (!priv->rxports[nport])
+			continue;
 
 		ret = v4l2_subdev_call(priv->rxports[nport]->source.sd, pad,
 				       get_frame_desc,

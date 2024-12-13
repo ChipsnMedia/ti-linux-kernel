@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
- * Copyright (C) 2021 Texas Instruments Incorporated - https://www.ti.com/
+ * Copyright (C) 2024 Texas Instruments Incorporated - https://www.ti.com/
  */
 
 /dts-v1/;
@@ -96,6 +96,18 @@
 		main_r5fss1_core1_memory_region: r5f-memory@a3100000 {
 			compatible = "shared-dma-pool";
 			reg = <0x00 0xa3100000 0x00 0xf00000>;
+			no-map;
+		};
+
+		mcu_m4fss_dma_memory_region: m4f-dma-memory@a4000000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0xa4000000 0x00 0x100000>;
+			no-map;
+		};
+
+		mcu_m4fss_memory_region: m4f-memory@a4100000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0xa4100000 0x00 0xf00000>;
 			no-map;
 		};
 
@@ -526,6 +538,11 @@
 &cpsw3g {
 	pinctrl-names = "default";
 	pinctrl-0 = <&rgmii1_pins_default>, <&rgmii2_pins_default>;
+
+	/* Map HW8_TS_PUSH to GENF1 */
+	cpts@3d000 {
+		ti,pps = <7 1>;
+	};
 };
 
 &cpsw_port1 {
@@ -677,6 +694,30 @@
 			<&main_r5fss1_core1_memory_region>;
 };
 
+&mcu_m4fss {
+	mboxes = <&mailbox0_cluster6 &mbox_m4_0>;
+	memory-region = <&mcu_m4fss_dma_memory_region>,
+			<&mcu_m4fss_memory_region>;
+	status = "okay";
+};
+
+/* main domain timers 8 to 11 are used by TI MCU FW */
+&main_timer8 {
+	status = "reserved";
+};
+
+&main_timer9 {
+	status = "reserved";
+};
+
+&main_timer10 {
+	status = "reserved";
+};
+
+&main_timer11 {
+	status = "reserved";
+};
+
 &ecap0 {
 	status = "okay";
 	/* PWM is available on Pin 1 of header J3 */
@@ -689,4 +730,20 @@
 	/* EQEP0 A & B available on pins 18 & 22 of J4 header */
 	pinctrl-names = "default";
 	pinctrl-0 = <&main_eqep0_pins_default>;
+};
+
+#define TS_OFFSET(pa, val)     (0x4+(pa)*4) (0x10000 | val)
+
+&timesync_router {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&cpsw_cpts_pps>;
+
+	/* Use Time Sync Router to map GENF1 input to HW8_TS_PUSH output. */
+	cpsw_cpts_pps: cpsw-cpts-pps {
+		pinctrl-single,pins = <
+			/* pps [cpts genf1] in22 -> out37 [cpts hw8_push] */
+			TS_OFFSET(37, 22)
+			>;
+	};
 };

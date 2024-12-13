@@ -52,6 +52,10 @@ enum vpu_instance_state {
 #define WAVE5_ENC_AVC_BUF_SIZE(_w, _h) (ALIGN(_w, 64) * ALIGN(_h, 64) / 32)
 #define WAVE5_ENC_HEVC_BUF_SIZE(_w, _h) (ALIGN(_w, 64) / 64 * ALIGN(_h, 64) / 64 * 128)
 
+#define IS_WRAP(_v, _max) ((_v % _max) ? 1 : 0)
+#define DEC_BUF_OFFSET 3
+#define MAX_TIMESTAMP_CIR_BUF 30
+
 /*
  * common struct and definition
  */
@@ -366,6 +370,8 @@ struct dec_open_param {
 struct dec_initial_info {
 	u32 pic_width;
 	u32 pic_height;
+	s32 f_rate_numerator; /* the numerator part of frame rate fraction */
+	s32 f_rate_denominator; /* the denominator part of frame rate fraction */
 	struct vpu_rect pic_crop_rect;
 	u32 min_frame_buffer_count; /* between 1 to 16 */
 
@@ -456,6 +462,27 @@ struct queue_status_info {
 #define MAX_NUM_TEMPORAL_LAYER 7
 #define MAX_NUM_SPATIAL_LAYER 3
 #define MAX_GOP_NUM 8
+
+enum enc_change_param {
+	// COMMON parameters which can be changed frame by frame.
+	W5_ENC_CHANGE_PARAM_PPS                 = (1<<0),
+	W5_ENC_CHANGE_PARAM_INTRA_PARAM         = (1<<1),
+	W5_ENC_CHANGE_PARAM_RC_FRAME_RATE       = (1<<6),
+	W5_ENC_CHANGE_PARAM_RC_TARGET_RATE      = (1<<8),
+	W5_ENC_CHANGE_PARAM_RC                  = (1<<9),
+	W5_ENC_CHANGE_PARAM_RC_MIN_MAX_QP       = (1<<10),
+	W5_ENC_CHANGE_PARAM_RC_BIT_RATIO_LAYER  = (1<<11),
+	W5_ENC_CHANGE_PARAM_RC_INTER_MIN_MAX_QP = (1<<12),
+	W5_ENC_CHANGE_PARAM_RC_WEIGHT           = (1<<13),
+	W5_ENC_CHANGE_PARAM_INDEPEND_SLICE      = (1<<16),
+	W5_ENC_CHANGE_PARAM_DEPEND_SLICE        = (1<<17),
+	W5_ENC_CHANGE_PARAM_RDO                 = (1<<18),
+	W5_ENC_CHANGE_PARAM_NR                  = (1<<19),
+	W5_ENC_CHANGE_PARAM_BG                  = (1<<20),
+	W5_ENC_CHANGE_PARAM_CUSTOM_MD           = (1<<21),
+	W5_ENC_CHANGE_PARAM_CUSTOM_LAMBDA       = (1<<22),
+	W5_ENC_CHANGE_PARAM_VUI_HRD_PARAM       = (1<<23),
+};
 
 struct custom_gop_pic_param {
 	u32 pic_type; /* picture type of nth picture in the custom GOP */
@@ -566,6 +593,10 @@ struct enc_wave_param {
 	u32 lambda_scaling_enable: 1; /* enable lambda scaling using custom GOP */
 	u32 transform8x8_enable: 1; /* enable 8x8 intra prediction and 8x8 transform */
 	u32 mb_level_rc_enable: 1; /* enable MB-level rate control */
+	u32 forced_idr_header_enable: 1; /* enable header encoding before IDR frame */
+	u32 constraint_set1_flag: 1; /* enable CBP */
+	u32 forced_idr_pictype_enable: 1;
+	u32 bg_detection: 1; /* enable background detection */
 };
 
 struct enc_open_param {
@@ -615,6 +646,8 @@ struct enc_param {
 	struct enc_code_opt code_option;
 	u64 pts; /* presentation timestamp (PTS) of the input source */
 	bool src_end_flag;
+	s32  force_pictype_enable; /* A flag to use a force picture type (WAVE only) */
+	s32  force_pic_type;       /* A force picture type (I, P, B, IDR). It is valid when forcePicTypeEnable is 1. (WAVE only) */
 };
 
 struct enc_output_info {
@@ -762,6 +795,15 @@ struct vpu_device {
 	struct kthread_worker *worker;
 	int vpu_poll_interval;
 	int num_clks;
+	bool opp_table_detected;
+	unsigned long opp_pixel_rate;
+	unsigned long opp_freq;
+};
+
+struct timestamp_circ_buf {
+	u64 buf[MAX_TIMESTAMP_CIR_BUF];
+	int head;
+	int tail;
 };
 
 struct vpu_instance;
@@ -799,21 +841,29 @@ struct vpu_instance {
 	struct frame_buffer frame_buf[MAX_REG_FRAME];
 	struct vpu_buf frame_vbuf[MAX_REG_FRAME];
 	u32 fbc_buf_count;
+	u32 dst_buf_count; // number of ready buffers for display
 	u32 queued_src_buf_num;
 	u32 queued_dst_buf_num;
 	struct list_head avail_src_bufs;
 	struct list_head avail_dst_bufs;
 	struct v4l2_rect conf_win;
 	u64 timestamp;
+	struct timestamp_circ_buf time_stamp;
 	enum frame_buffer_format output_format;
 	bool cbcr_interleave;
 	bool nv21;
 	bool eos;
+	bool retry;
+	bool empty_queue;
+	int queuing_num;
+	struct mutex feed_lock; /* lock for feeding bitstream buffers */
 	struct vpu_buf bitstream_vbuf;
 	dma_addr_t last_rd_ptr;
 	size_t remaining_consumed_bytes;
 	bool needs_reallocation;
 
+	struct semaphore run_sem;
+	struct task_struct *run_thread;
 	unsigned int min_src_buf_count;
 	unsigned int rot_angle;
 	unsigned int mirror_direction;
@@ -824,7 +874,13 @@ struct vpu_instance {
 	unsigned int rc_enable;
 	unsigned int bit_rate;
 	unsigned int encode_aud;
+	unsigned int change_param_flags;
 	struct enc_wave_param enc_param;
+	unsigned long pixel_rate;
+	unsigned int *map_index;
+	dma_addr_t *mapped_dma_addr;
+	unsigned int cap_io_mode;
+	struct mutex inst_lock;
 };
 
 void wave5_vdi_write_register(struct vpu_device *vpu_dev, u32 addr, u32 data);
@@ -854,6 +910,7 @@ int wave5_vpu_dec_set_rd_ptr(struct vpu_instance *inst, dma_addr_t addr, int upd
 dma_addr_t wave5_vpu_dec_get_rd_ptr(struct vpu_instance *inst);
 int wave5_vpu_dec_reset_framebuffer(struct vpu_instance *inst, unsigned int index);
 int wave5_vpu_dec_give_command(struct vpu_instance *inst, enum codec_command cmd, void *parameter);
+int wave5_vpu_enc_change_param(struct vpu_instance *inst, u32 *fail_res);
 int wave5_vpu_dec_get_bitstream_buffer(struct vpu_instance *inst, dma_addr_t *prd_ptr,
 				       dma_addr_t *pwr_ptr, size_t *size);
 int wave5_vpu_dec_update_bitstream_buffer(struct vpu_instance *inst, size_t size);
